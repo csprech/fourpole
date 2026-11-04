@@ -39,6 +39,9 @@ PanelLookAndFeel::PanelLookAndFeel()
     setColour (juce::AlertWindow::textColourId, colours::silk);
     setColour (juce::TooltipWindow::backgroundColourId, juce::Colour (0xfff4f1e6));
     setColour (juce::TooltipWindow::textColourId, juce::Colour (0xff202020));
+    // value bubbles on knobs: the same cream card as the tooltips
+    setColour (juce::BubbleComponent::backgroundColourId, juce::Colour (0xfff4f1e6));
+    setColour (juce::BubbleComponent::outlineColourId, juce::Colour (0xff5a574f));
 }
 
 void PanelLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down)
@@ -61,6 +64,18 @@ void PanelLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b,
         g.setColour (juce::Colours::white.withAlpha (0.05f));
         g.fillRoundedRectangle (r, 2.5f);
     }
+    if (b.getToggleState()) // a lit lamp in the button (REC while recording)
+    {
+        auto dot = juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ r.getX() + 11.0f, r.getCentreY() });
+        juce::ColourGradient halo (colours::lampRed.withAlpha (0.6f), dot.getCentreX(), dot.getCentreY(), colours::lampRed.withAlpha (0.0f),
+                                   dot.getCentreX() + 10.0f, dot.getCentreY(), true);
+        g.setGradientFill (halo);
+        g.fillEllipse (dot.expanded (10.0f));
+        g.setColour (colours::lampRed);
+        g.fillEllipse (dot);
+        g.setColour (juce::Colours::white.withAlpha (0.7f));
+        g.fillEllipse (dot.reduced (2.0f).translated (-0.5f, -0.5f));
+    }
 }
 
 void PanelLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool, bool down)
@@ -81,7 +96,7 @@ void PanelLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w,
     const float d = juce::jmin (bounds.getWidth(), bounds.getHeight());
     auto kb = juce::Rectangle<float> (d, d).withCentre (bounds.getCentre());
     const float angle = start + pos * (end - start);
-    materials::roundShadow (g, kb.getCentre(), d * 0.47f, d * 0.24f);
+    // (the shadow is drawn by the knob's parent, behind it: drawn here it would be clipped to the knob's square)
     const float sc = materials::scaleOf (g);
     const int px = (int) std::ceil (d * sc);
     struct LastRender { float angle = -100.0f; int size = 0; juce::Image image; };

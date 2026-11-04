@@ -7,6 +7,28 @@
 
 namespace fourpole
 {
+/** A slider that reports right-clicks (for MIDI learn) instead of starting a drag. */
+class KnobSlider : public juce::Slider
+{
+public:
+    std::function<void()> onRightClick;
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu() && onRightClick)
+        {
+            rightClicked = true;
+            return onRightClick();
+        }
+        rightClicked = false;
+        juce::Slider::mouseDown (e);
+    }
+    void mouseDrag (const juce::MouseEvent& e) override { if (! rightClicked) juce::Slider::mouseDrag (e); }
+    void mouseUp (const juce::MouseEvent& e) override { if (! rightClicked) juce::Slider::mouseUp (e); }
+
+private:
+    bool rightClicked = false;
+};
+
 /** A knob with its scale and name printed on the panel around it. */
 class PanelKnob : public juce::Component
 {
@@ -14,8 +36,9 @@ public:
     /** scaleLabels: printed numbers spread evenly from min to max (e.g. 0..10, -5..+5). */
     PanelKnob (const juce::String& name, double min, double max, double defaultValue, juce::StringArray scaleLabels, bool large = false);
 
-    juce::Slider slider;
+    KnobSlider slider;
     std::function<void (double)> onChange;
+    const juce::String& getName() const { return name; }
     void setValue (double v) { slider.setValue (v, juce::dontSendNotification); }
 
     void paint (juce::Graphics&) override;
@@ -23,6 +46,8 @@ public:
 
 protected:
     juce::Rectangle<float> knobBounds() const;
+    /** The knob's shadow on the panel: drawn here, behind the knob, so it isn't clipped to the knob's square. */
+    void drawKnobShadow (juce::Graphics&) const;
     juce::String name;
     juce::StringArray scale;
     bool large;
@@ -49,23 +74,40 @@ public:
     Rocker (const juce::String& label, juce::Colour cap, const juce::String& onText = "ON", const juce::String& offText = "OFF");
     void paintButton (juce::Graphics&, bool over, bool down) override;
     std::function<void (bool)> onToggle;
+    std::function<void()> onRightClick;
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        rightClicked = e.mods.isPopupMenu() && onRightClick;
+        if (rightClicked)
+            return onRightClick();
+        juce::Button::mouseDown (e);
+    }
+    void mouseUp (const juce::MouseEvent& e) override { if (! rightClicked) juce::Button::mouseUp (e); }
 
 private:
     void clicked() override;
     juce::Colour capColour;
     juce::String onText, offText;
+    bool rightClicked = false;
 };
 
 /** Indicator lamp (e.g. OVERLOAD). */
 class Lamp : public juce::Component
 {
 public:
-    explicit Lamp (const juce::String& text) : label (text) { setInterceptsMouseClicks (false, false); }
+    explicit Lamp (const juce::String& text, juce::Colour c = theme::colours::lampRed) : label (text), colour (c)
+    {
+        setInterceptsMouseClicks (false, false);
+    }
     void setOn (bool b) { if (b != on) { on = b; repaint(); } }
+    /** Lens diameter in px. Give the component about 5x this so the glow isn't clipped. */
+    void setLensSize (float d) { lens = d; repaint(); }
     void paint (juce::Graphics&) override;
 
 private:
     juce::String label;
+    juce::Colour colour;
+    float lens = 14.0f;
     bool on = false;
 };
 

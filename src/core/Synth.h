@@ -22,6 +22,12 @@ public:
     void allNotesOff();
     void setPitchBend (float bend) { pitchBend = std::clamp (bend, -1.0f, 1.0f); } // -1..1
     void setModWheel (float m) { modWheel = std::clamp (m, 0.0f, 1.0f); }           // 0..1
+    /** Sustain pedal: while down, released keys keep sounding (and keep their place in note priority). */
+    void setSustain (bool down);
+    /** Audio for EXTERNAL INPUT this block (a cable in the jack), or nullptr: the output feeds back instead. */
+    void setExternalInput (const float* samples) { extInput = samples; }
+    /** POWER: off = silence (contours are reset so nothing is left hanging when it comes back on). */
+    void setPower (bool on);
 
     /** Renders mono into `out` (numSamples). */
     void process (float* out, int numSamples);
@@ -43,7 +49,9 @@ private:
     Noise noise;
     KeyAssigner keys;
 
-    bool gate = false;
+    bool gate = false, sustainDown = false, powered = true;
+    std::array<bool, 128> physicallyHeld {}, sustained {};
+    const float* extInput = nullptr;
     double targetPitch = 60.0, pitch = 60.0;
     float velocityGain = 1.0f, pitchBend = 0.0f, modWheel = 0.0f;
     float lastOsc3 = 0.0f, lastOutput = 0.0f;

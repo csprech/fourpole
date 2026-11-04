@@ -1,5 +1,6 @@
 #include "ui/MainComponent.h"
 #include "ui/Materials.h"
+#include "core/Mapping.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 
 namespace fourpole
@@ -9,6 +10,18 @@ namespace
 // computer keyboard: a piano layout on the home row (A = C), W E T Y U O P = black keys
 constexpr char kKeys[18] = { 'a', 'w', 's', 'e', 'd', 'f', 't', 'g', 'y', 'h', 'u', 'j', 'k', 'o', 'l', 'p', ';', '\'' };
 const juce::StringArray kTen { "0", "2", "4", "6", "8", "10" };
+
+juce::String formatSeconds (double s)
+{
+    if (s < 1.0)
+        return (s < 0.1 ? juce::String (s * 1000.0, 1) : juce::String (juce::roundToInt (s * 1000.0))) + " ms";
+    return juce::String (s, s < 10.0 ? 2 : 1) + " s";
+}
+
+juce::String formatHz (double hz)
+{
+    return hz >= 1000.0 ? juce::String (hz / 1000.0, hz >= 10000.0 ? 1 : 2) + " kHz" : (hz < 100.0 ? juce::String (hz, 1) : juce::String (juce::roundToInt (hz))) + " Hz";
+}
 } // namespace
 
 MainComponent::MainComponent (Engine& e) : engine (e)
@@ -113,10 +126,102 @@ MainComponent::MainComponent (Engine& e) : engine (e)
     setupBtn.onClick = [this] { showSetupMenu(); };
     audioBtn.onClick = [this] { showAudioSettings(); };
     helpBtn.onClick = [this] { showHelp(); };
-    for (auto* b : { &prevBtn, &nextBtn, &saveBtn, &saveAsBtn, &loadBtn, &setupBtn, &audioBtn, &helpBtn })
+    recBtn.setClickingTogglesState (false);
+    recBtn.setTooltip ("Record what you play to a WAV file (Music/Fourpole Recordings)");
+    recBtn.onClick = [this] { toggleRecording(); };
+    for (auto* b : { &prevBtn, &nextBtn, &saveBtn, &saveAsBtn, &loadBtn, &setupBtn, &audioBtn, &helpBtn, &recBtn })
         addAndMakeVisible (b);
 
     engine.onMidiDeviceMessage = [this] (const juce::String& m) { flash (m); };
+
+    // ---- POWER and its pilot lamp (not part of the patch, like the real switch)
+    powerSw.setToggleState (true, juce::dontSendNotification);
+    powerSw.onToggle = [this] (bool on) {
+        engine.setPower (on);
+        pilot.setOn (on);
+        flash (on ? "Power on" : "Power off");
+    };
+    pilot.setOn (true);
+    pilot.setLensSize (10.0f);
+    overload.setLensSize (13.0f);
+    addAndMakeVisible (powerSw);
+    addAndMakeVisible (pilot);
+
+    // ---- readouts in real units (hover a knob, or turn it)
+    auto unitText = [] (PanelKnob& k, std::function<juce::String (double)> f) { k.slider.textFromValueFunction = std::move (f); };
+    unitText (tune, [] (double v) { return (v >= 0 ? "+" : "") + juce::String (juce::roundToInt (v * 100.0)) + " cents"; });
+    unitText (glide, [] (double v) { return v <= 0.0 ? juce::String ("off") : formatSeconds (mapping::glideSeconds ((float) v)); });
+    unitText (modMix, [] (double v) { return juce::String (juce::roundToInt (100.0 - v * 10.0)) + "% osc 3 / " + juce::String (juce::roundToInt (v * 10.0)) + "% noise"; });
+    for (int i = 0; i < 3; ++i)
+    {
+        range[(size_t) i]->slider.textFromValueFunction = [] (double v) {
+            static const char* names[] = { "LO (sub-audio)", "32'", "16'", "8'", "4'", "2'" };
+            return juce::String (names[juce::jlimit (0, 5, (int) v)]);
+        };
+        wave[(size_t) i]->slider.textFromValueFunction = [i] (double v) {
+            static const char* names[] = { "triangle", "tri-saw", "sawtooth", "square", "wide pulse", "narrow pulse" };
+            const int w = juce::jlimit (0, 5, (int) v);
+            return juce::String (i == 2 && w == 1 ? "reverse saw" : names[w]);
+        };
+        range[(size_t) i]->slider.setPopupDisplayEnabled (true, true, nullptr);
+        wave[(size_t) i]->slider.setPopupDisplayEnabled (true, true, nullptr);
+        if (freq[(size_t) i])
+            unitText (*freq[(size_t) i], [] (double v) { return (v >= 0 ? "+" : "") + juce::String (v, 2) + " semitones"; });
+        unitText (*oscVol[(size_t) i], [] (double v) { return juce::String (v, 1); });
+    }
+    unitText (cutoff, [] (double v) { return formatHz (mapping::cutoffHz ((float) v)); });
+    unitText (emphasis, [] (double v) { return juce::String (v, 1) + (mapping::emphasisFeedback ((float) v) >= 4.0 ? "  (self-oscillates)" : ""); });
+    unitText (contourAmt, [] (double v) { return juce::String (mapping::contourOctaves ((float) v), 1) + " octaves"; });
+    for (auto* k : { &fAttack, &lAttack })
+        unitText (*k, [] (double v) { return formatSeconds (mapping::attackSeconds ((float) v)); });
+    for (auto* k : { &fDecay, &lDecay })
+        unitText (*k, [] (double v) { return formatSeconds (mapping::decaySeconds ((float) v)); });
+    for (auto* k : { &fSustain, &lSustain })
+        unitText (*k, [] (double v) { return juce::String (juce::roundToInt (v * 10.0)) + "%"; });
+    unitText (volume, [] (double v) { return v <= 0.0 ? juce::String ("silent") : juce::String (juce::Decibels::gainToDecibels (mapping::outputGain ((float) v)), 1) + " dB"; });
+    for (auto* k : { &extVol, &noiseVol })
+        unitText (*k, [] (double v) { return juce::String (v, 1); });
+
+    // ---- MIDI learn: every knob and switch has an ID; right-click to assign a controller CC
+    registerControl ("tune", tune);
+    registerControl ("glide", glide);
+    registerControl ("modMix", modMix);
+    registerControl ("oscModulation", oscMod);
+    registerControl ("osc3Control", osc3Control);
+    for (int i = 0; i < 3; ++i)
+    {
+        const auto n = "osc" + juce::String (i + 1);
+        registerControl (n + ".range", *range[(size_t) i]);
+        registerControl (n + ".wave", *wave[(size_t) i]);
+        if (freq[(size_t) i])
+            registerControl (n + ".frequency", *freq[(size_t) i]);
+        registerControl (n + ".volume", *oscVol[(size_t) i]);
+        registerControl (n + ".on", *oscOn[(size_t) i]);
+    }
+    registerControl ("extVolume", extVol);
+    registerControl ("extOn", extOn);
+    registerControl ("noiseVolume", noiseVol);
+    registerControl ("noiseOn", noiseOn);
+    registerControl ("pinkNoise", pink);
+    registerControl ("cutoff", cutoff);
+    registerControl ("emphasis", emphasis);
+    registerControl ("contourAmount", contourAmt);
+    registerControl ("filterModulation", filterMod);
+    registerControl ("keyboardControl1", kb1);
+    registerControl ("keyboardControl2", kb2);
+    registerControl ("filterAttack", fAttack);
+    registerControl ("filterDecay", fDecay);
+    registerControl ("filterSustain", fSustain);
+    registerControl ("loudAttack", lAttack);
+    registerControl ("loudDecay", lDecay);
+    registerControl ("loudSustain", lSustain);
+    registerControl ("volume", volume);
+    registerControl ("outputOn", outputOn);
+    registerControl ("a440", a440);
+    registerControl ("glideOn", glideOn);
+    registerControl ("decayOn", decayOn);
+    loadSettings();
+    updateTooltips();
 
     // keys belong to the keyboard: nothing else takes keyboard focus
     std::function<void (juce::Component&)> noFocus = [&noFocus] (juce::Component& c) {
@@ -144,6 +249,9 @@ MainComponent::MainComponent (Engine& e) : engine (e)
 
 MainComponent::~MainComponent()
 {
+    if (engine.isRecording())
+        engine.stopRecording();
+    saveSettings();
     stopTimer();
     engine.onMidiDeviceMessage = nullptr;
     juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
@@ -309,6 +417,25 @@ void MainComponent::showSetupMenu()
     m.addSubMenu ("Velocity to loudness", vel);
     m.addSubMenu ("Oscillator drift", drift);
     m.addSeparator();
+    juce::PopupMenu ext;
+    ext.addItem ("Nothing plugged in (output feedback, like the original)", true, ! engine.isUsingExternalAudioInput(),
+                 [this] { engine.setExternalAudioInput (false); saveSettings(); flash ("EXTERNAL INPUT: output feedback"); });
+    ext.addItem ("Audio input 1 (process any sound through the filter)", true, engine.isUsingExternalAudioInput(),
+                 [this] { engine.setExternalAudioInput (true); saveSettings(); flash ("EXTERNAL INPUT: audio input 1 - turn up EXTERNAL INPUT in the mixer"); });
+    m.addSubMenu ("External input jack", ext);
+    juce::PopupMenu midi;
+    for (auto& [cc, id] : midiMap.all())
+        midi.addItem ("CC " + juce::String (cc) + "  ->  " + controlName (id), false, false, nullptr);
+    midi.addSeparator();
+    midi.addItem ("Reset to defaults (CC 70-77 = an 8-knob controller)", [this] { midiMap.resetToDefaults(); saveSettings(); updateTooltips(); flash ("MIDI assignments reset"); });
+    midi.addItem ("Clear all", [this] { midiMap.fromJson (juce::var (new juce::DynamicObject())); saveSettings(); updateTooltips(); flash ("MIDI assignments cleared"); });
+    m.addSubMenu ("MIDI controller assignments (right-click a knob to learn)", midi);
+    m.addItem ("Show recordings folder", [] {
+        auto dir = juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("Fourpole Recordings");
+        dir.createDirectory();
+        dir.revealToUser();
+    });
+    m.addSeparator();
     m.addItem ("Init patch", [this] { patch = factoryPatches()[0]; patchIndex = 0; currentFile = juce::File(); loadPatchIntoControls(); engine.setPatch (patch); });
     m.addItem ("All notes off", [this] { engine.allNotesOff(); });
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&setupBtn));
@@ -330,7 +457,11 @@ void MainComponent::showHelp()
         "TRICKS: EMPHASIS at 10 + both KEYBOARD CONTROL switches = the filter plays as a sine oscillator. "
         "EXTERNAL INPUT on and up = output feedback overdrive.\n\n"
         "PATCHES: < > step through factory and saved patches. Save goes to Music/Fourpole Patches. "
-        "SETUP: pitch wheel range, note priority, velocity, drift.\n\n"
+        "SETUP: pitch wheel range, note priority, velocity, drift, the external input jack, MIDI assignments.\n\n"
+        "MIDI CONTROLLERS: knobs on CC 70-77 (e.g. an MPK Mini's K1-K8) control contour amount, emphasis, loudness decay "
+        "and attack, cutoff, filter decay, glide and oscillator 2 frequency. RIGHT-CLICK any knob or switch and choose MIDI learn "
+        "to assign it to whatever you move next. A sustain pedal holds notes.\n\n"
+        "REC records what you play to Music/Fourpole Recordings. Hover a knob to read its value in Hz, ms or semitones.\n\n"
         "MIDI IN: " + (inputs.isEmpty() ? juce::String ("no controllers connected") : inputs.joinIntoString (", ")) + ".");
 }
 
@@ -348,11 +479,176 @@ void MainComponent::showAudioSettings()
     o.launchAsync();
 }
 
+// ---------------------------------------------------------------- recording
+
+void MainComponent::toggleRecording()
+{
+    if (engine.isRecording())
+    {
+        const auto f = engine.stopRecording();
+        recBtn.setToggleState (false, juce::dontSendNotification);
+        flash ("Saved " + f.getFileName());
+        return;
+    }
+    const auto dir = juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("Fourpole Recordings");
+    const auto f = dir.getChildFile ("Fourpole " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S") + ".wav");
+    if (! engine.startRecording (f))
+        flash ("Couldn't start recording in " + dir.getFullPathName());
+}
+
+// ---------------------------------------------------------------- MIDI learn
+
+void MainComponent::registerControl (const juce::String& id, PanelKnob& k)
+{
+    controls[id].knob = &k;
+    k.slider.onRightClick = [this, id] { showControlMenu (id); };
+}
+
+void MainComponent::registerControl (const juce::String& id, Rocker& r)
+{
+    controls[id].rocker = &r;
+    r.onRightClick = [this, id] { showControlMenu (id); };
+}
+
+juce::String MainComponent::controlName (const juce::String& id) const
+{
+    auto it = controls.find (id);
+    if (it == controls.end())
+        return id;
+    juce::String n = it->second.knob != nullptr ? it->second.knob->getName() : it->second.rocker->getButtonText();
+    n = n.replace ("\n", " ");
+    if (n.isEmpty())
+        n = id;
+    // disambiguate the repeated names (contours, oscillators, mixer switches)
+    if (id.startsWith ("filter") && (id.endsWith ("Attack") || id.endsWith ("Decay") || id.endsWith ("Sustain")))
+        n = "FILTER " + n;
+    else if (id.startsWith ("loud"))
+        n = "LOUDNESS " + n;
+    else if (id.startsWith ("osc") && id.containsChar ('.'))
+        n = "OSC " + id.substring (3, 4) + " " + (id.endsWith (".on") ? juce::String ("ON/OFF") : n);
+    else if (id == "extOn")
+        n = "EXTERNAL INPUT ON/OFF";
+    else if (id == "noiseOn")
+        n = "NOISE ON/OFF";
+    return n;
+}
+
+void MainComponent::updateTooltips()
+{
+    for (auto& [id, ref] : controls)
+    {
+        const int cc = midiMap.ccFor (id);
+        const auto learn = juce::String (cc >= 0 ? "MIDI CC " + juce::String (cc) + ". " : juce::String()) + "Right-click: MIDI learn";
+        if (ref.knob != nullptr)
+            continue; // knobs show their value bubble on hover instead (a tooltip would cover it)
+        else
+        {
+            // keep a switch's own explanation, with the MIDI line after it
+            auto tip = ref.rocker->getTooltip().upToFirstOccurrenceOf ("\n", false, false);
+            if (tip.contains ("MIDI learn"))
+                tip.clear();
+            ref.rocker->setTooltip (tip.isEmpty() ? learn : tip + "\n" + learn);
+        }
+    }
+}
+
+void MainComponent::showControlMenu (const juce::String& id)
+{
+    juce::PopupMenu m;
+    m.addSectionHeader (controlName (id));
+    const int cc = midiMap.ccFor (id);
+    m.addItem ("MIDI learn...", [this, id] {
+        learnTarget = id;
+        message = "MIDI LEARN: move a knob or button on your controller for " + controlName (id) + "  (Esc cancels)";
+        messageUntil = juce::Time::getMillisecondCounter() + 15000;
+        repaint (namePlate);
+    });
+    if (cc >= 0)
+        m.addItem ("Forget CC " + juce::String (cc), [this, id] {
+            midiMap.forgetControl (id);
+            saveSettings();
+            updateTooltips();
+            flash ("Forgot the MIDI assignment");
+        });
+    m.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+}
+
+void MainComponent::applyController (int cc, int value)
+{
+    if (learnTarget.isNotEmpty())
+    {
+        midiMap.assign (cc, learnTarget);
+        flash ("CC " + juce::String (cc) + " now controls " + controlName (learnTarget));
+        learnTarget.clear();
+        saveSettings();
+        updateTooltips();
+    }
+    auto it = controls.find (midiMap.controlFor (cc));
+    if (it == controls.end())
+        return;
+    if (auto* k = it->second.knob)
+    {
+        auto& s = k->slider;
+        const auto span = s.getRange();
+        double v = span.getStart() + span.getLength() * value / 127.0;
+        if (s.getInterval() >= 1.0)
+            v = std::round (v);
+        s.setValue (v, juce::sendNotificationSync); // moves the knob and edits the patch
+    }
+    else if (auto* r = it->second.rocker)
+    {
+        const bool on = value >= 64;
+        if (on != r->getToggleState())
+        {
+            r->setToggleState (on, juce::dontSendNotification);
+            if (r->onToggle)
+                r->onToggle (on);
+        }
+    }
+}
+
+void MainComponent::loadSettings()
+{
+    juce::PropertiesFile::Options o;
+    o.applicationName = "Fourpole";
+    o.filenameSuffix = ".settings";
+    o.osxLibrarySubFolder = "Application Support";
+    o.folderName = "Fourpole";
+    settings = std::make_unique<juce::PropertiesFile> (o);
+    if (settings->containsKey ("midiMap"))
+        midiMap.fromJson (juce::JSON::parse (settings->getValue ("midiMap")));
+    if (settings->getBoolValue ("externalAudioInput", false))
+        engine.setExternalAudioInput (true);
+}
+
+void MainComponent::saveSettings()
+{
+    if (settings == nullptr)
+        return;
+    settings->setValue ("midiMap", juce::JSON::toString (midiMap.toJson(), true));
+    settings->setValue ("externalAudioInput", engine.isUsingExternalAudioInput());
+    settings->saveIfNeeded();
+}
+
 // ---------------------------------------------------------------- timer / keys
 
 void MainComponent::timerCallback()
 {
     overload.setOn (engine.isOverloaded());
+    for (int cc = 0, value = 0, n = 0; n < 64 && engine.nextControllerMessage (cc, value); ++n)
+        applyController (cc, value);
+    if (engine.isRecording())
+    {
+        recBtn.setToggleState ((juce::Time::getMillisecondCounter() / 500) % 2 == 0, juce::dontSendNotification);
+        const int secs = (int) engine.getRecordedSeconds();
+        const auto text = "RECORDING  " + juce::String (secs / 60) + ":" + juce::String (secs % 60).paddedLeft ('0', 2) + "  (press REC to stop)";
+        if (message != text)
+        {
+            message = text;
+            messageUntil = juce::Time::getMillisecondCounter() + 1500;
+            repaint (namePlate);
+        }
+    }
     keyboard.refreshExternal();
     if (! pitchWheel.isBeingDragged())
         pitchWheel.setValue (engine.getMidiPitchBend());
@@ -380,6 +676,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
     if (k == juce::KeyPress::leftKey) { stepPatch (-1); return true; }
     if (k == juce::KeyPress::rightKey) { stepPatch (1); return true; }
     if (k.getTextCharacter() == '?') { showHelp(); return true; }
+    if (k == juce::KeyPress::escapeKey && learnTarget.isNotEmpty()) { learnTarget.clear(); flash ("MIDI learn cancelled"); return true; }
     for (auto key : kKeys)
         if (c == (juce::juce_wchar) key)
             return true; // handled in keyStateChanged
@@ -437,6 +734,8 @@ void MainComponent::resized()
             btn->setBounds (right.removeFromRight (btn == &audioBtn ? 100 : 76));
             right.removeFromRight (6);
         }
+        b.removeFromRight (16);
+        recBtn.setBounds (b.removeFromRight (64));
         prevBtn.setBounds (b.removeFromLeft (30));
         b.removeFromLeft (4);
         namePlate = b.removeFromLeft (juce::jmin (380, b.getWidth() / 2));
@@ -502,7 +801,7 @@ void MainComponent::resized()
             knobs[i]->setBounds (row.removeFromLeft (row.getWidth() * 2 / 3));
             rocks[i]->setBounds (row.withSizeKeepingCentre (row.getWidth(), juce::jmin (row.getHeight(), 52)));
             if (i == 1)
-                overload.setBounds (extra.withSizeKeepingCentre (extra.getWidth(), 40));
+                overload.setBounds (extra.withSizeKeepingCentre (extra.getWidth() + 20, juce::jmin (row.getHeight() + 10, 70)));
             if (i == 3)
                 pink.setBounds (extra.withSizeKeepingCentre (extra.getWidth(), juce::jmin (row.getHeight(), 58)));
         }
@@ -535,8 +834,12 @@ void MainComponent::resized()
     {
         auto s = sections[4].withTrimmedTop (head).reduced (4, 0);
         volume.setBounds (grid (s, 3, 0));
-        outputOn.setBounds (grid (s, 3, 1).withSizeKeepingCentre (s.getWidth(), 70));
-        a440.setBounds (grid (s, 3, 2).withSizeKeepingCentre (s.getWidth(), 70));
+        auto mid = grid (s, 3, 1);
+        outputOn.setBounds (mid.removeFromLeft (mid.getWidth() / 2).withSizeKeepingCentre (mid.getWidth() / 2, 70));
+        a440.setBounds (mid.withSizeKeepingCentre (mid.getWidth(), 70));
+        auto bottom = grid (s, 3, 2);
+        powerSw.setBounds (bottom.removeFromLeft (bottom.getWidth() / 2).withSizeKeepingCentre (bottom.getWidth() / 2, 70));
+        pilot.setBounds (bottom.withSizeKeepingCentre (60, 60).translated (0, 4)); // a small jewel lamp, with room for its glow
     }
 
     // ---- keyboard bed: wheels and glide/decay on the left, then the keys

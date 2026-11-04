@@ -22,7 +22,6 @@ public:
     void parentHierarchyChanged() override;
     void mouseDown (const juce::MouseEvent&) override { grabKeyboardFocus(); }
 
-
 private:
     void timerCallback() override;
     void renderBackground (juce::Graphics&, float scale);
@@ -36,6 +35,15 @@ private:
     void showHelp();
     void showAudioSettings();
     juce::File patchFolder() const;
+    void toggleRecording();
+    void registerControl (const juce::String& id, PanelKnob& k);
+    void registerControl (const juce::String& id, Rocker& r);
+    void showControlMenu (const juce::String& id);
+    void applyController (int cc, int value);
+    void saveSettings();
+    void loadSettings();
+    juce::String controlName (const juce::String& id) const;
+    void updateTooltips();
 
     Engine& engine;
     Patch patch;
@@ -76,7 +84,9 @@ private:
 
     // ---- output
     PanelKnob volume { "VOLUME", 0, 10, 6, { "0", "2", "4", "6", "8", "10" } };
-    Rocker outputOn { "MAIN\nOUTPUT", theme::colours::rockerBlack }, a440 { "A-440", theme::colours::rockerWhite };
+    Rocker outputOn { "MAIN\nOUTPUT", theme::colours::rockerBlack }, a440 { "A-440", theme::colours::rockerWhite },
+        powerSw { "POWER", theme::colours::rockerBlack };
+    Lamp pilot { "", juce::Colour (0xffffb43a) };
 
     // ---- keyboard bed
     Rocker glideOn { "GLIDE", theme::colours::rockerWhite }, decayOn { "DECAY", theme::colours::rockerWhite };
@@ -85,7 +95,7 @@ private:
 
     // ---- patch bar
     juce::TextButton prevBtn { "<" }, nextBtn { ">" }, saveBtn { "Save" }, saveAsBtn { "Save as" }, loadBtn { "Load" },
-        setupBtn { "Setup" }, audioBtn { "Audio/MIDI" }, helpBtn { "Help" };
+        setupBtn { "Setup" }, audioBtn { "Audio/MIDI" }, helpBtn { "Help" }, recBtn { "Rec" };
     juce::Rectangle<int> barArea, namePlate, panelArea, bedArea, controllerBlock, keysArea, leftCheek, rightCheek, topRail, midRail,
         bottomRail, wordmarkArea;
     std::array<juce::Rectangle<int>, 5> sections;
@@ -100,5 +110,16 @@ private:
     std::array<int, 18> keyNote {};
     bool loading = false;
     juce::Image background;
+
+    // MIDI learn: panel controls by ID, the CC map, and the control waiting to learn a CC
+    struct ControlRef
+    {
+        PanelKnob* knob = nullptr;
+        Rocker* rocker = nullptr;
+    };
+    std::map<juce::String, ControlRef> controls;
+    MidiMap midiMap;
+    juce::String learnTarget;
+    std::unique_ptr<juce::PropertiesFile> settings;
 };
 } // namespace fourpole

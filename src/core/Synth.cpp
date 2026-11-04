@@ -1,5 +1,6 @@
 #include "core/Synth.h"
 #include "core/Mapping.h"
+#include <algorithm>
 
 namespace fourpole
 {
@@ -19,8 +20,46 @@ void Synth::prepare (double sr)
     lastOutput = 0.0f;
 }
 
+void Synth::setSustain (bool down)
+{
+    if (down == sustainDown)
+        return;
+    sustainDown = down;
+    if (! down)
+        for (int n = 0; n < 128; ++n)
+            if (sustained[(size_t) n])
+            {
+                sustained[(size_t) n] = false;
+                if (! physicallyHeld[(size_t) n])
+                    noteOff (n);
+            }
+}
+
+void Synth::setPower (bool on)
+{
+    if (on == powered)
+        return;
+    powered = on;
+    if (! on)
+    {
+        keys.clear();
+        physicallyHeld.fill (false);
+        sustained.fill (false);
+        gate = false;
+        filterContour.reset();
+        loudness.reset();
+        filter.reset();
+        lastOutput = 0.0f;
+        dcState = 0.0; // or the AC-coupling filter would leak a decaying offset after power-on
+    }
+}
+
 void Synth::noteOn (int note, int velocity)
 {
+    if (note < 0 || note > 127 || ! powered)
+        return;
+    physicallyHeld[(size_t) note] = true;
+    sustained[(size_t) note] = false;
     const auto r = keys.noteOn (note, patch.priority);
     targetPitch = r.note;
     if (! patch.glideOn)
@@ -37,6 +76,17 @@ void Synth::noteOn (int note, int velocity)
 
 void Synth::noteOff (int note)
 {
+    if (note < 0 || note > 127)
+        return;
+    if (physicallyHeld[(size_t) note])
+    {
+        physicallyHeld[(size_t) note] = false;
+        if (sustainDown)
+        {
+            sustained[(size_t) note] = true; // the pedal keeps it down
+            return;
+        }
+    }
     const auto r = keys.noteOff (note, patch.priority);
     if (r.gateOn)
     {
@@ -53,6 +103,8 @@ void Synth::noteOff (int note)
 void Synth::allNotesOff()
 {
     keys.clear();
+    physicallyHeld.fill (false);
+    sustained.fill (false);
     gate = false;
     filterContour.release();
     loudness.release();
@@ -60,6 +112,11 @@ void Synth::allNotesOff()
 
 void Synth::process (float* out, int numSamples)
 {
+    if (! powered)
+    {
+        std::fill (out, out + numSamples, 0.0f);
+        return;
+    }
     const auto& p = patch;
     // per-block constants
     const double glideTau = p.glideOn ? mapping::glideSeconds (p.glide) : 0.0;
@@ -117,7 +174,8 @@ void Synth::process (float* out, int numSamples)
             mix += v * gains[(size_t) i];
         }
         mix += nz * noiseGain;
-        mix += lastOutput * extGain;
+        // EXTERNAL INPUT: a cable in the jack, or (nothing plugged in) the main output fed back
+        mix += (extInput != nullptr ? extInput[n] * 2.0f : lastOutput) * extGain;
 
         // ---- mixer stage: drives into soft saturation; the lamp lights when it's pushed hard
         if (std::abs (mix) > 1.8)

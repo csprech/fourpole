@@ -15,6 +15,7 @@ set(FOURPOLE_CORE_SOURCES
   src/core/Dsp.cpp
   src/core/Synth.cpp
   src/core/Patch.cpp
+  src/core/MidiMap.cpp
 )
 
 set(FOURPOLE_JUCE_DEFS
@@ -29,7 +30,9 @@ if(FOURPOLE_BUILD_APP)
 juce_add_gui_app(Fourpole
   PRODUCT_NAME "Fourpole"
   COMPANY_NAME "Fourpole Research"
-  BUNDLE_ID "org.fourpole.app")
+  BUNDLE_ID "org.fourpole.app"
+  MICROPHONE_PERMISSION_ENABLED TRUE
+  MICROPHONE_PERMISSION_TEXT "Fourpole uses audio input 1 as its EXTERNAL INPUT when you choose to plug it in.")
 
 target_sources(Fourpole PRIVATE
   ${FOURPOLE_CORE_SOURCES}

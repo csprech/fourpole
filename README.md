@@ -34,7 +34,7 @@ open build/Fourpole_artefacts/Release/Fourpole.app
 
 - **Keyboard:** click the keys (drag for a glissando).
 - **Computer keyboard:** `A W S E D F T G Y H U J K O L P ; '` play C up to F. `Z` / `X` move down / up an octave.
-- **MIDI controller:** plug it in at any time, before or after starting Fourpole. Notes, pitch bend and the mod wheel work. Keys you play over MIDI light up on the screen keyboard.
+- **MIDI controller:** plug it in at any time, before or after starting Fourpole. Notes, pitch bend, the mod wheel and a sustain pedal work, and keys you play over MIDI light up on the screen keyboard. Knobs and buttons can turn the panel's controls (see below).
 - **Wheels:** PITCH springs back to the centre; MOD stays where you leave it.
 - **Patches:** `<` `>` (or the arrow keys) step through the factory patches, then your own. **Save** / **Save as** write `.fourpole` files (plain JSON) to `~/Music/Fourpole Patches`. **Load** opens one from anywhere.
 - **Setup:** conveniences the original didn't have:
@@ -42,7 +42,35 @@ open build/Fourpole_artefacts/Release/Fourpole.app
   - note priority: low (the original), high or last;
   - velocity to loudness (off on the original);
   - oscillator drift: off, subtle or vintage.
+- **Readouts:** hover over a knob (or turn it) to see its value in real units: cutoff in Hz, contour times in ms or s, frequency in semitones, the range in feet, the waveform's name.
+- **REC** records what you play to a WAV file in `~/Music/Fourpole Recordings`. The REC lamp lights and the name plate shows the time.
+- **POWER** (bottom of the OUTPUT section) switches the instrument off and on, with its pilot lamp.
 - **Help** (or `?`): a quick guide.
+
+### MIDI controller knobs
+
+| CC | Default control | On an MPK Mini mk3 |
+|---|---|---|
+| 70 | Amount of contour | K1 |
+| 71 | Emphasis | K2 |
+| 72 | Loudness decay | K3 |
+| 73 | Loudness attack | K4 |
+| 74 | Cutoff frequency | K5 |
+| 75 | Filter decay | K6 |
+| 76 | Glide | K7 |
+| 77 | Oscillator 2 frequency | K8 |
+| 7 | Volume | |
+| 1 / 64 | Mod wheel / sustain pedal | |
+
+These also line up with the General MIDI sound controllers (71 resonance, 72 release, 73 attack, 74 cutoff, 75 decay), so many controllers' defaults land somewhere sensible.
+
+**MIDI learn:** right-click any knob or switch and choose **MIDI learn**, then move a knob or press a button on your controller. A switch turns on at values of 64 and above. Right-click again to forget an assignment. **Setup > MIDI controller assignments** lists them all and can reset them. Assignments are saved between sessions.
+
+### External input jack
+
+**Setup > External input jack** sets what EXTERNAL INPUT hears:
+- **Nothing plugged in** (the default, like the original): it hears the main output, for the feedback overdrive trick.
+- **Audio input 1:** it hears the first input of your audio interface, so any sound (a drum loop, a guitar, a voice) goes through the mixer, the ladder filter and the loudness contour. Hold a key or set the loudness sustain to hear it; macOS asks for microphone access the first time.
 
 ## The panel
 
@@ -85,8 +113,11 @@ src/core/     platform-neutral DSP (unit-tested, no GUI)
   Mapping     panel units -> Hz / seconds / octaves (ranges from docs/research.md)
   Dsp         polyBLEP VCO with drift, nonlinear ladder filter, RC contours, white/pink noise,
               low/high/last-note key assigner with single triggering
-  Synth       the voice: VCOs + noise + output feedback -> saturating mixer -> ladder -> VCA
-src/engine/   Engine: audio + MIDI I/O (hot-plug MIDI inputs), sample-accurate note timing
+  Synth       the voice: VCOs + noise + external input / output feedback -> saturating mixer -> ladder -> VCA;
+              sustain pedal, power
+  MidiMap     controller CC -> panel control assignments (MIDI learn)
+src/engine/   Engine: audio + MIDI I/O (hot-plug MIDI inputs), sample-accurate note timing, recording
+              (a background writer thread), external audio input
 src/ui/       panel: Materials (lit renderer for knobs, rockers, lamps, walnut), controls,
               44-key keyboard, MainComponent (layout, patches)
 tests/        JUCE UnitTest suites for all of core/
@@ -97,13 +128,14 @@ tests/        JUCE UnitTest suites for all of core/
 - Patches reach it under a short SpinLock, once per block when they change.
 - Notes and controllers from the screen and from MIDI are merged and placed sample-accurately within each block.
 
-**What the tests check (105 checks):**
+**What the tests check (121 checks):**
 - Every waveform hits its frequency; pulse waves have no DC.
 - The ladder rolls off at 24 dB/octave (−73 dB three octaves above cutoff) and self-oscillates within 8% of the cutoff at full emphasis.
 - Contour times and the DECAY switch.
 - Low / high / last priority and single triggering.
 - Glide time constants; keyboard tracking ⅓, ⅔ and full; 4 octaves of contour sweep.
 - OSC. 3 CONTROL, vibrato, mixer overload, external-input feedback, A-440.
+- The sustain pedal, external audio through the filter, the POWER switch, and the MIDI CC map (learn, defaults, save / load).
 - Every factory patch round-trips through JSON and plays.
 
 **Testing aid:** `FOURPOLE_CAPTURE_WAV=/path/out.wav open Fourpole.app` records the first 20 s of the app's output to a WAV when it quits. That's how the running app was checked: notes from the screen keyboard and from a MIDI controller plugged in after launch both came out at the right pitch.
@@ -111,7 +143,7 @@ tests/        JUCE UnitTest suites for all of core/
 ## Not done yet
 
 - Nobody has listened to it against a real instrument yet. The voice follows published measurements and circuit models, but the exact tone, filter curve and contour shapes haven't been compared with recordings of the hardware.
-- Real external audio input (the EXTERNAL INPUT jack is always the output feedback here).
-- MIDI CC mapping for the panel knobs, MIDI learn, MIDI out.
+- MIDI out (sending the keyboard and knobs to other gear).
+- The audio-input setting for EXTERNAL INPUT is unit-tested but hasn't been tried with a real interface in the running app.
 - Oscillator hard sync and other later-model additions; polyphony and paraphony (it's a monosynth by design).
 - A plugin (AU/VST3) version.

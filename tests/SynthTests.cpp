@@ -1,5 +1,6 @@
 #include "TestHelpers.h"
 #include "core/Mapping.h"
+#include "core/MidiMap.h"
 #include "core/Synth.h"
 #include <juce_core/juce_core.h>
 
@@ -243,6 +244,80 @@ struct SynthTests : juce::UnitTest
             s.setPatch (p);
             const auto x = render (s, 48000);
             expectWithinAbsoluteError (fptest::zeroCrossingHz (x, sr, 100), 440.0, 0.5);
+        }
+
+        beginTest ("sustain pedal holds released keys until it comes up");
+        {
+            Synth s;
+            s.prepare (sr);
+            s.setPatch (quiet());
+            s.setSustain (true);
+            s.noteOn (60, 100);
+            render (s, 480);
+            s.noteOff (60);
+            render (s, 9600);
+            expect (s.isGateOn(), "still held by the pedal");
+            expect (s.getLoudness() > 0.5);
+            s.noteOn (55, 100); // a new key while sustaining: low-note priority still applies
+            render (s, 48);
+            expectWithinAbsoluteError (s.getPitch(), 55.0, 0.01);
+            s.noteOff (55);
+            s.setSustain (false);
+            render (s, 4800);
+            expect (! s.isGateOn(), "released when the pedal comes up");
+            expect (s.getLoudness() < 0.01);
+        }
+
+        beginTest ("EXTERNAL INPUT with a cable in: the input is filtered like an oscillator");
+        {
+            Synth s;
+            s.prepare (sr);
+            auto p = quiet();
+            p.oscOn = { false, false, false };
+            p.extOn = true;
+            p.extVolume = 6.0f;
+            p.cutoff = 5.0f;
+            s.setPatch (p);
+            std::vector<float> in (4800);
+            for (size_t i = 0; i < in.size(); ++i)
+                in[i] = 0.3f * (float) std::sin (2 * 3.141592653589793 * 330.0 * (double) i / sr);
+            s.setExternalInput (in.data());
+            s.noteOn (60, 100);
+            std::vector<float> out (4800);
+            s.process (out.data(), 4800);
+            expect (fptest::rms (out, 2400, 4800) > 0.02, "input reaches the output");
+            expectWithinAbsoluteError (fptest::zeroCrossingHz (out, sr, 1200), 330.0, 3.0);
+        }
+
+        beginTest ("POWER off silences everything and clears held notes");
+        {
+            Synth s;
+            s.prepare (sr);
+            s.setPatch (quiet());
+            s.noteOn (60, 100);
+            render (s, 4800);
+            s.setPower (false);
+            expect (fptest::rms (render (s, 4800), 0, 4800) == 0.0);
+            s.setPower (true);
+            expect (fptest::rms (render (s, 4800), 0, 4800) < 1.0e-4, "nothing left hanging");
+        }
+
+        beginTest ("MIDI map: defaults, learn, one CC per control, JSON");
+        {
+            MidiMap m;
+            expectEquals (m.controlFor (74), juce::String ("cutoff"));
+            m.assign (20, "cutoff");
+            expectEquals (m.controlFor (20), juce::String ("cutoff"));
+            expect (m.controlFor (74).isEmpty(), "the old CC is freed");
+            m.assign (64, "emphasis");
+            expect (m.controlFor (64).isEmpty(), "sustain is reserved");
+            MidiMap d, dBack;
+            dBack.fromJson (juce::JSON::parse (juce::JSON::toString (d.toJson())));
+            expect (dBack.all() == d.all(), "the defaults survive a save / load unchanged");
+            MidiMap n;
+            n.fromJson (juce::JSON::parse (juce::JSON::toString (m.toJson())));
+            expectEquals (n.ccFor ("cutoff"), 20);
+            expectEquals (n.ccFor ("emphasis"), 71);
         }
 
         beginTest ("patches round-trip through JSON; every factory patch plays");

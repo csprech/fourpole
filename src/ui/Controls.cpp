@@ -36,8 +36,16 @@ juce::Rectangle<float> PanelKnob::knobBounds() const
 
 void PanelKnob::resized() { slider.setBounds (knobBounds().toNearestInt()); }
 
+void PanelKnob::drawKnobShadow (juce::Graphics& g) const
+{
+    const auto kb = knobBounds();
+    // the knob stands about half its radius proud of the panel; the light is top-left
+    materials::roundShadow (g, kb.getCentre(), kb.getWidth() * 0.47f, kb.getWidth() * 0.21f);
+}
+
 void PanelKnob::paint (juce::Graphics& g)
 {
+    drawKnobShadow (g);
     const auto kb = knobBounds();
     const auto c = kb.getCentre();
     const float R = kb.getWidth() * 0.5f;
@@ -109,6 +117,7 @@ void Selector::paint (juce::Graphics& g)
     if (kind == Kind::Range)
         return PanelKnob::paint (g);
     // waveform pictures instead of numbers
+    drawKnobShadow (g);
     const auto kb = knobBounds();
     const auto c = kb.getCentre();
     const float R = kb.getWidth() * 0.5f;
@@ -203,21 +212,32 @@ void Rocker::paintButton (juce::Graphics& g, bool over, bool)
 void Lamp::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
-    drawPrint (g, label, r.removeFromTop (12.0f), juce::Justification::centred, 8.5f);
-    const float d = juce::jmin (r.getWidth(), r.getHeight()) * 0.55f;
-    auto lens = juce::Rectangle<float> (d, d).withCentre (r.getCentre());
-    const float sc = materials::scaleOf (g);
-    const int px = (int) std::ceil (lens.getWidth() * 1.4f * sc);
-    auto dest = lens.expanded (lens.getWidth() * 0.2f);
-    materials::drawAt (g, materials::cached ("lamp0:" + juce::String (px), [=] { return materials::led (px, colours::lampRed, false); }), dest);
+    if (label.isNotEmpty())
+        drawPrint (g, label, r.removeFromTop (12.0f), juce::Justification::centred, 8.5f);
+    const float d = juce::jmin (lens, r.getWidth() * 0.4f, r.getHeight() * 0.4f);
+    auto lensR = juce::Rectangle<float> (d, d).withCentre (r.getCentre());
+    // the glow: as big as the component allows, so its edge always fades out before it's clipped
+    const float glow = juce::jmin (r.getWidth(), r.getHeight()) * 0.5f;
     if (on)
     {
-        materials::drawAt (g, materials::cached ("lamp1:" + juce::String (px), [=] { return materials::led (px, colours::lampRed, true); }), dest);
-        juce::ColourGradient halo (colours::lampRed.withAlpha (0.55f), lens.getCentreX(), lens.getCentreY(), colours::lampRed.withAlpha (0.0f),
-                                   lens.getCentreX() + d * 1.8f, lens.getCentreY(), true);
+        juce::ColourGradient halo (colour.withAlpha (0.5f), lensR.getCentreX(), lensR.getCentreY(), colour.withAlpha (0.0f),
+                                   lensR.getCentreX() + glow, lensR.getCentreY(), true);
+        halo.addColour (0.3, colour.withAlpha (0.16f));
         g.setGradientFill (halo);
-        g.fillEllipse (lens.expanded (d * 1.8f));
+        g.fillEllipse (juce::Rectangle<float> (glow * 2.0f, glow * 2.0f).withCentre (lensR.getCentre()));
     }
+    // a chrome bezel ring around the jewel
+    g.setColour (juce::Colour (0xff8a8a8e));
+    g.drawEllipse (lensR.expanded (2.2f), 1.6f);
+    g.setColour (juce::Colours::black.withAlpha (0.7f));
+    g.drawEllipse (lensR.expanded (3.4f), 0.8f);
+    const float sc = materials::scaleOf (g);
+    const int px = (int) std::ceil (lensR.getWidth() * 1.4f * sc);
+    auto dest = lensR.expanded (lensR.getWidth() * 0.2f);
+    const auto key = juce::String (px) + colour.toString();
+    materials::drawAt (g, materials::cached ("lamp0:" + key, [px, c = colour] { return materials::led (px, c, false); }), dest);
+    if (on)
+        materials::drawAt (g, materials::cached ("lamp1:" + key, [px, c = colour] { return materials::led (px, c, true); }), dest);
 }
 
 // ------------------------------------------------------------------ wheel
@@ -242,42 +262,63 @@ void Wheel::setValue (float v)
 void Wheel::paint (juce::Graphics& g)
 {
     auto slot = slotBounds();
-    // the slot in the keyboard bed
-    g.setColour (juce::Colours::black);
-    g.fillRoundedRectangle (slot.expanded (3.0f), 4.0f);
-    g.setColour (juce::Colours::white.withAlpha (0.10f));
-    g.drawRoundedRectangle (slot.expanded (3.0f).translated (0, 1.0f), 4.0f, 1.0f);
+    // the slot in the keyboard bed: dark, with the lit far edge and an inner shadow
+    auto well = slot.expanded (4.0f, 5.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.12f));
+    g.drawRoundedRectangle (well.translated (0, 1.0f), 5.0f, 1.0f);
+    g.setColour (juce::Colour (0xff050505));
+    g.fillRoundedRectangle (well, 5.0f);
 
-    // the wheel: a cylinder seen side-on; ribs move as it turns
-    auto w = slot.reduced (2.0f, 1.0f);
-    juce::ColourGradient body (juce::Colour (0xff1b1b1d), w.getX(), 0, juce::Colour (0xff1b1b1d), w.getRight(), 0, false);
-    body.addColour (0.35, juce::Colour (0xff4a4a4e));
-    body.addColour (0.55, juce::Colour (0xff2c2c2f));
-    g.setGradientFill (body);
-    g.fillRect (w);
-    // shading top/bottom: the cylinder curves away
-    g.setGradientFill (juce::ColourGradient (juce::Colours::black.withAlpha (0.75f), 0, w.getY(), juce::Colours::transparentBlack, 0, w.getY() + w.getHeight() * 0.3f, false));
-    g.fillRect (w);
-    g.setGradientFill (juce::ColourGradient (juce::Colours::transparentBlack, 0, w.getBottom() - w.getHeight() * 0.3f, juce::Colours::black.withAlpha (0.75f), 0, w.getBottom(), false));
-    g.fillRect (w);
-    const float pitch = 6.0f, travel = (spring ? (value + 1.0f) * 0.5f : value) * w.getHeight() * 0.9f;
-    for (float y = std::fmod (travel, pitch); y < w.getHeight(); y += pitch)
+    // the wheel is a cylinder turning about a horizontal axis: we see its curved face from above
+    auto w = slot.reduced (1.5f, 0.0f);
+    const float h = w.getHeight();
+    auto shadeAt = [] (float t) {
+        // t: -1 (top edge) .. 1 (bottom edge); light from above and slightly behind
+        const float nz = std::sqrt (std::max (0.0f, 1.0f - t * t)); // surface normal facing us
+        const float lit = 0.25f + 0.75f * std::max (0.0f, 0.55f * nz - 0.45f * t);
+        return lit;
+    };
+    const int bands = (int) h;
+    for (int i = 0; i < bands; ++i)
     {
-        // ribs bunch up toward the edges (foreshortening)
-        const float t = (y / w.getHeight()) * 2.0f - 1.0f;
-        const float yy = w.getCentreY() + std::sin (t * 1.2f) / std::sin (1.2f) * w.getHeight() * 0.5f;
-        const float a = 0.55f * (1.0f - std::abs (t));
-        g.setColour (juce::Colours::white.withAlpha (0.10f * a));
-        g.drawHorizontalLine ((int) yy, w.getX(), w.getRight());
-        g.setColour (juce::Colours::black.withAlpha (0.6f * a));
-        g.drawHorizontalLine ((int) yy + 1, w.getX(), w.getRight());
+        const float t = (i + 0.5f) / (float) bands * 2.0f - 1.0f;
+        const float l = shadeAt (t);
+        // satin rubber: a broad sheen where the surface faces the light (around a third of the way down)
+        const float sheen = 0.20f * std::exp (-std::pow ((t + 0.35f) / 0.22f, 2.0f));
+        const float v = 0.06f + 0.30f * l + sheen;
+        g.setColour (juce::Colour::fromFloatRGBA (v, v, v * 1.03f, 1.0f));
+        g.fillRect (juce::Rectangle<float> (w.getX(), w.getY() + (float) i, w.getWidth(), 1.0f));
     }
-    // centre mark on the pitch wheel
+    // ribs around the circumference: they roll with the wheel and bunch up toward the edges
+    const float turn = (spring ? value * 0.5f : value - 0.5f) * 2.6f; // radians of rotation shown
+    const int ribs = 28;
+    for (int k = 0; k < ribs; ++k)
+    {
+        const float phi = std::fmod ((float) k / ribs * juce::MathConstants<float>::twoPi - turn + 100.0f * juce::MathConstants<float>::twoPi,
+                                     juce::MathConstants<float>::twoPi) - juce::MathConstants<float>::pi;
+        if (std::abs (phi) > 1.35f)
+            continue; // round the back
+        const float y = w.getCentreY() + std::sin (phi) * h * 0.5f;
+        const float facing = std::cos (phi);
+        // each rib: a dark groove with a lit ridge just behind it
+        g.setColour (juce::Colours::black.withAlpha (0.65f * facing));
+        g.fillRect (juce::Rectangle<float> (w.getX() + 1.0f, y - 0.8f, w.getWidth() - 2.0f, 1.6f * facing + 0.4f));
+        g.setColour (juce::Colours::white.withAlpha (0.16f * facing * facing));
+        g.fillRect (juce::Rectangle<float> (w.getX() + 1.0f, y + 1.0f, w.getWidth() - 2.0f, 1.0f));
+    }
+    // the side walls of the slot shade the wheel's edges
+    g.setGradientFill (juce::ColourGradient (juce::Colours::black.withAlpha (0.55f), w.getX(), 0, juce::Colours::transparentBlack, w.getX() + 6.0f, 0, false));
+    g.fillRect (w.withWidth (6.0f));
+    g.setGradientFill (juce::ColourGradient (juce::Colours::transparentBlack, w.getRight() - 6.0f, 0, juce::Colours::black.withAlpha (0.55f), w.getRight(), 0, false));
+    g.fillRect (w.withTrimmedLeft (w.getWidth() - 6.0f));
+
+    // the pitch wheel's white centre line rolls with it
     if (spring)
     {
-        const float my = w.getCentreY() - value * w.getHeight() * 0.42f;
-        g.setColour (colours::silk.withAlpha (0.85f * (1.0f - std::abs (value) * 0.6f)));
-        g.fillRect (juce::Rectangle<float> (w.getX() + 2.0f, my - 1.0f, w.getWidth() - 4.0f, 2.0f));
+        const float phi = value * 1.3f;
+        const float my = w.getCentreY() - std::sin (phi) * h * 0.5f;
+        g.setColour (theme::colours::silk.withAlpha (0.9f * std::cos (phi)));
+        g.fillRect (juce::Rectangle<float> (w.getX() + 2.0f, my - 1.2f, w.getWidth() - 4.0f, 2.4f));
     }
     drawPrint (g, label, getLocalBounds().toFloat().removeFromBottom (16.0f), juce::Justification::centred, 9.0f);
 }

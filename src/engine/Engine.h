@@ -6,6 +6,7 @@
 //    MidiMessageCollector, so they land sample-accurately inside the next block.
 //  * MIDI inputs can be plugged in any time (all enabled inputs are heard; new ones are switched on).
 
+#include "core/MidiMap.h"
 #include "core/Synth.h"
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_basics/juce_audio_basics.h>
@@ -32,6 +33,27 @@ public:
     void setPitchBend (float bend);  // -1..1
     void setModWheel (float amount); // 0..1
     void allNotesOff();
+    void setSustain (bool down);
+
+    /** POWER switch: off silences the instrument. */
+    void setPower (bool on) { power = on; }
+    bool isPowered() const { return power.load(); }
+
+    /** EXTERNAL INPUT source: false = nothing plugged in (the output feeds back, like the original),
+        true = audio input 1 of the audio interface (opens the input; macOS asks for microphone access). */
+    void setExternalAudioInput (bool useAudioInput);
+    bool isUsingExternalAudioInput() const { return useInput.load(); }
+    float getInputLevel() const { return inputLevel.load(); }
+
+    /** Recording what you play to a WAV file (written on a background thread). */
+    bool startRecording (const juce::File& file);
+    juce::File stopRecording(); // returns the file, or none
+    bool isRecording() const { return activeWriter.load() != nullptr; }
+    double getRecordedSeconds() const { return recordedSamples.load() / juce::jmax (1.0, sampleRate.load()); }
+
+    /** MIDI controller CCs for the panel (everything but mod wheel / sustain / all-notes-off),
+        picked up on the message thread. Returns false when there are none left. */
+    bool nextControllerMessage (int& cc, int& value);
 
     // feedback for the UI
     bool isOverloaded() const { return overloaded.load(); }
@@ -73,6 +95,23 @@ private:
     juce::AudioBuffer<float> capture;
     std::atomic<int> captured { 0 };
     double captureRate = 48000.0;
+
+    std::atomic<bool> power { true }, useInput { false };
+    std::atomic<float> inputLevel { 0.0f };
+    std::atomic<double> sampleRate { 48000.0 };
+
+    // panel CCs from MIDI threads -> message thread
+    juce::AbstractFifo ccFifo { 512 };
+    std::array<std::pair<int, int>, 512> ccItems {};
+    juce::CriticalSection ccWriteLock; // several MIDI inputs may call in at once
+
+    // recording: ThreadedWriter keeps disk writes off the audio thread
+    juce::TimeSliceThread writerThread { "Fourpole recorder" };
+    std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> threadedWriter;
+    juce::CriticalSection writerLock;
+    std::atomic<juce::AudioFormatWriter::ThreadedWriter*> activeWriter { nullptr };
+    std::atomic<juce::int64> recordedSamples { 0 };
+    juce::File recordingFile;
 
     juce::Array<juce::MidiDeviceInfo> knownMidiInputs;
     juce::MidiDeviceListConnection midiDeviceListConnection;

@@ -62,23 +62,34 @@ void Keyboard::drawKey (juce::Graphics& g, int note, bool down)
     auto r = keyBounds (note);
     if (! isBlack (note))
     {
-        auto k = r.reduced (0.8f, 0.0f).withTrimmedBottom (down ? 1.0f : 3.0f);
-        // ivory: warm, slightly yellowed, darker toward the back where it disappears under the rail
-        juce::ColourGradient ivory (juce::Colour (0xffcfc8b6), 0, k.getY(), juce::Colour (0xfff2ecdd), 0, k.getY() + k.getHeight() * 0.25f, false);
-        ivory.addColour (0.85, juce::Colour (0xffece5d4));
-        ivory.addColour (1.0, juce::Colour (down ? 0xffcfc7b4 : 0xffd9d1bf));
+        auto k = r.reduced (0.6f, 0.0f).withTrimmedBottom (down ? 1.0f : 4.0f);
+        // ivory: warm, a touch different key to key (they age unevenly), darker toward the rail
+        const float tone = 1.0f - 0.025f * (float) ((note * 7919) % 5) / 4.0f;
+        auto iv = [tone] (juce::uint32 c) { return juce::Colour (c).withMultipliedBrightness (tone); };
+        juce::ColourGradient ivory (iv (0xffc9c1ae), 0, k.getY(), iv (0xfff3eddf), 0, k.getY() + k.getHeight() * 0.22f, false);
+        ivory.addColour (0.80, iv (0xffede6d6));
+        ivory.addColour (1.0, iv (down ? 0xffd2cab7 : 0xffe2dac8));
         g.setGradientFill (ivory);
-        g.fillRoundedRectangle (k, 2.5f);
+        g.fillRoundedRectangle (k, 2.0f);
+        // pressed: the key pivots at the back, so its front dips into shadow
         if (down)
         {
-            g.setColour (juce::Colours::black.withAlpha (0.10f));
-            g.fillRoundedRectangle (k, 2.5f);
+            g.setGradientFill (juce::ColourGradient (juce::Colours::transparentBlack, 0, k.getY(), juce::Colours::black.withAlpha (0.16f), 0, k.getBottom(), false));
+            g.fillRoundedRectangle (k, 2.0f);
         }
-        // the front lip of the key
-        g.setColour (juce::Colours::black.withAlpha (down ? 0.18f : 0.28f));
-        g.fillRect (k.withTop (k.getBottom() - (down ? 2.0f : 4.0f)));
-        g.setColour (juce::Colours::black.withAlpha (0.45f));
-        g.drawVerticalLine ((int) r.getRight(), r.getY(), r.getBottom());
+        // a rounded front edge: light top line, then the lip in shadow
+        auto lip = k.withTop (k.getBottom() - (down ? 3.0f : 5.0f));
+        g.setColour (juce::Colours::white.withAlpha (0.55f));
+        g.fillRect (lip.withHeight (1.0f));
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0x40000000), 0, lip.getY() + 1.0f, juce::Colour (0x80000000), 0, lip.getBottom(), false));
+        g.fillRect (lip.withTrimmedTop (1.0f));
+        // bevelled sides: lit left edge, shaded right edge, and the dark gap between keys
+        g.setColour (juce::Colours::white.withAlpha (0.45f));
+        g.fillRect (juce::Rectangle<float> (k.getX(), k.getY() + 12.0f, 1.0f, k.getHeight() - 18.0f));
+        g.setColour (juce::Colours::black.withAlpha (0.12f));
+        g.fillRect (juce::Rectangle<float> (k.getRight() - 1.5f, k.getY(), 1.5f, k.getHeight()));
+        g.setColour (juce::Colour (0xff141210));
+        g.fillRect (juce::Rectangle<float> (r.getRight() - 0.6f, r.getY(), 1.2f, r.getBottom()));
     }
     else
     {
