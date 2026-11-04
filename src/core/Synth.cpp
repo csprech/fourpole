@@ -120,7 +120,7 @@ void Synth::process (float* out, int numSamples)
         mix += lastOutput * extGain;
 
         // ---- mixer stage: drives into soft saturation; the lamp lights when it's pushed hard
-        if (std::abs (mix) > 1.6)
+        if (std::abs (mix) > 1.8)
             overloadHold = (int) (sampleRate * 0.15);
         else if (overloadHold > 0)
             --overloadHold;

@@ -202,9 +202,16 @@ struct SynthTests : juce::UnitTest
             expect (! s.isOverloaded());
             p.oscVolume = { 10, 10, 10 };
             p.oscOn = { true, true, true };
+            p.osc[1].frequency = 0.15f; // slightly detuned, so their peaks line up now and then
+            p.osc[2].frequency = -0.1f;
             s.setPatch (p);
-            render (s, 4800);
-            expect (s.isOverloaded());
+            bool lit = false;
+            for (int i = 0; i < 40 && ! lit; ++i)
+            {
+                render (s, 2400);
+                lit = s.isOverloaded();
+            }
+            expect (lit);
         }
 
         beginTest ("EXT INPUT feedback with nothing plugged in drives the mixer");

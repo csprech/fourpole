@@ -11,7 +11,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <functional>
 
-namespace padlab::materials
+namespace fourpole::materials
 {
 struct Shading
 {
@@ -57,6 +57,9 @@ juce::Image wheelDimple (int diameter, float angle, float knurlPhase, juce::Poin
 /** A soft oily smudge (white, alpha only) for glass reflections. */
 juce::Image smudge (int w, int h, uint32_t seed);
 
+/** Walnut. The grain runs along y, or along x when `horizontal`. Opaque. */
+juce::Image woodTile (int w, int h, uint32_t seed, bool horizontal = false);
+
 /** Tileable powder-coat paint texture (opaque). */
 juce::Image paintTile (juce::Colour base, int size, float roughness = 1.0f, uint32_t seed = 7);
 
@@ -68,4 +71,4 @@ void drawAt (juce::Graphics& g, const juce::Image& img, juce::Rectangle<float> d
     stands, in the same units as radius. */
 void roundShadow (juce::Graphics& g, juce::Point<float> centre, float radius, float height, float strength = 1.0f);
 
-} // namespace padlab::materials
+} // namespace fourpole::materials

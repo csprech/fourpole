@@ -20,7 +20,6 @@ set(FOURPOLE_CORE_SOURCES
 set(FOURPOLE_JUCE_DEFS
   JUCE_WEB_BROWSER=0
   JUCE_USE_CURL=0
-  JUCE_DISPLAY_SPLASH_SCREEN=0
   JUCE_COREGRAPHICS_RENDER_WITH_MULTIPLE_PAINT_CALLS=1
 )
 
@@ -73,3 +72,4 @@ target_link_libraries(FourpoleTests PRIVATE
 
 enable_testing()
 add_test(NAME FourpoleTests COMMAND FourpoleTests)
+

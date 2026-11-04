@@ -163,7 +163,7 @@ const std::vector<Patch>& factoryPatches()
             p.osc[0] = { (int) R::Ft16, 0, (int) W::Saw };
             p.osc[1] = { (int) R::Ft16, 0.08f, (int) W::Square };
             p.osc[2] = { (int) R::Ft32, -0.06f, (int) W::Saw };
-            p.oscVolume = { 9, 8, 7 };
+            p.oscVolume = { 7.5f, 6.5f, 5.0f };
             p.oscOn = { true, true, true };
             p.cutoff = -2.6f; p.emphasis = 2.0f; p.contourAmount = 4.5f;
             p.filterAttack = 0; p.filterDecay = 4.2f; p.filterSustain = 2.5f;
@@ -196,7 +196,7 @@ const std::vector<Patch>& factoryPatches()
             p.osc[0] = { (int) R::Ft8, 0, (int) W::Saw };
             p.osc[1] = { (int) R::Ft8, -0.1f, (int) W::Saw };
             p.osc[2] = { (int) R::Ft16, 0.07f, (int) W::Saw };
-            p.oscVolume = { 8, 7, 5 };
+            p.oscVolume = { 7.5f, 6.5f, 4.5f };
             p.oscOn = { true, true, true };
             p.cutoff = -1.5f; p.emphasis = 1.5f; p.contourAmount = 6.5f;
             p.filterAttack = 4.2f; p.filterDecay = 5.5f; p.filterSustain = 6;

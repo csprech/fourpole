@@ -2,7 +2,7 @@
 #include <cmath>
 #include <map>
 
-namespace padlab::materials
+namespace fourpole::materials
 {
 namespace
 {
@@ -375,6 +375,36 @@ juce::Image smudge (int w, int h, uint32_t seed)
     return img;
 }
 
+juce::Image woodTile (int w, int h, uint32_t seed, bool horizontal)
+{
+    juce::Image img (juce::Image::ARGB, std::max (1, w), std::max (1, h), false); // ARGB: the native backend's layout
+    juce::Image::BitmapData bd (img, juce::Image::BitmapData::writeOnly);
+    const Rgb dark { 0.16f, 0.085f, 0.045f }, mid { 0.33f, 0.18f, 0.09f }, light { 0.46f, 0.27f, 0.13f };
+    for (int py = 0; py < h; ++py)
+        for (int px = 0; px < w; ++px)
+        {
+            // (x, y) in grain space: x across the grain, y along it
+            const int x = horizontal ? py : px, y = horizontal ? px : py;
+            // growth rings: stripes across x, wandering as they run along y
+            const float warp = 9.0f * valueNoise (x / 60.0f, y / 140.0f, seed) + 3.0f * valueNoise (x / 18.0f, y / 40.0f, seed + 1);
+            const float u = (x + warp * 4.0f) / 4.6f;
+            const float ring = 0.5f + 0.5f * std::sin (u + 2.5f * valueNoise (x / 40.0f, y / 300.0f, seed + 2));
+            const float figure = valueNoise (x / 25.0f, y / 90.0f, seed + 3);
+            float t = std::pow (ring, 1.6f) * 0.7f + figure * 0.3f;
+            // fine fibres and open pores (short dark streaks along the grain)
+            const float fibre = (hash (x, y / 3, seed + 4) - 0.5f) * 0.10f;
+            const float pore = hash (x, y / 9, seed + 5) > 0.985f ? -0.35f : 0.0f;
+            t = juce::jlimit (0.0f, 1.0f, t + fibre + pore);
+            if (horizontal)
+                t = 0.22f + 0.78f * t; // a thin rail shows few rings: keep it in the same tonal range as the cheeks
+            Rgb c = t < 0.5f ? Rgb { dark.r + (mid.r - dark.r) * t * 2, dark.g + (mid.g - dark.g) * t * 2, dark.b + (mid.b - dark.b) * t * 2 }
+                             : Rgb { mid.r + (light.r - mid.r) * (t - 0.5f) * 2, mid.g + (light.g - mid.g) * (t - 0.5f) * 2,
+                                     mid.b + (light.b - mid.b) * (t - 0.5f) * 2 };
+            put (bd, px, py, c, 1.0f);
+        }
+    return img;
+}
+
 void drawAt (juce::Graphics& g, const juce::Image& img, juce::Rectangle<float> dest, float opacity)
 {
     if (img.isNull())
@@ -408,4 +438,4 @@ void roundShadow (juce::Graphics& g, juce::Point<float> c, float radius, float h
     disc (c.translated (lx * height * 0.12f, ly * height * 0.12f), radius * 0.97f, radius * 1.12f, 0.62f * strength);
 }
 
-} // namespace padlab::materials
+} // namespace fourpole::materials
