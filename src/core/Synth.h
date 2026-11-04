@@ -55,7 +55,7 @@ private:
     double targetPitch = 60.0, pitch = 60.0;
     float velocityGain = 1.0f, pitchBend = 0.0f, modWheel = 0.0f;
     float lastOsc3 = 0.0f, lastOutput = 0.0f;
-    double dcState = 0.0, a440Phase = 0.0;
+    double dcState = 0.0, fbState = 0.0, a440Phase = 0.0;
     int overloadHold = 0;
     double lastCutoffHz = 1000.0;
     std::array<double, 3> lastOscHz {};

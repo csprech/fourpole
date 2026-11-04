@@ -16,7 +16,7 @@ void Synth::prepare (double sr)
     loudness.reset();
     keys.clear();
     gate = false;
-    dcState = 0.0;
+    dcState = fbState = 0.0;
     lastOutput = 0.0f;
 }
 
@@ -50,7 +50,7 @@ void Synth::setPower (bool on)
         loudness.reset();
         filter.reset();
         lastOutput = 0.0f;
-        dcState = 0.0; // or the AC-coupling filter would leak a decaying offset after power-on
+        dcState = fbState = 0.0; // or the AC-coupling filters would leak a decaying offset after power-on
     }
 }
 
@@ -136,12 +136,12 @@ void Synth::process (float* out, int numSamples)
     for (int i = 0; i < 3; ++i)
         gains[(size_t) i] = p.oscOn[(size_t) i] ? mapping::mixerGain (p.oscVolume[(size_t) i]) : 0.0;
     const double noiseGain = p.noiseOn ? mapping::mixerGain (p.noiseVolume) * 0.8 : 0.0;
-    // EXT INPUT with nothing plugged in: the (slightly attenuated) main output comes back in
-    const double extGain = p.extOn ? mapping::mixerGain (p.extVolume) * 2.2 : 0.0;
+    const double extGain = p.extOn ? mapping::mixerGain (p.extVolume) : 0.0;
     const double outGain = p.outputOn ? mapping::outputGain (p.volume) : 0.0;
     const double bend = pitchBend * p.bendRange;
     const double driftAmt = std::clamp (p.drift, 0.0f, 1.0f);
     const double dcCoef = std::exp (-2.0 * 3.141592653589793 * 8.0 / sampleRate);
+    const double fbCoef = std::exp (-2.0 * 3.141592653589793 * mapping::kFeedbackHighPassHz / sampleRate);
 
     for (int n = 0; n < numSamples; ++n)
     {
@@ -161,8 +161,7 @@ void Synth::process (float* out, int numSamples)
             const auto& o = p.osc[(size_t) i];
             const bool keyboard = i < 2 || p.osc3Control;
             double note = (keyboard ? pitch : mapping::kOsc3FreeNote) + p.tune + bend + 12.0 * mapping::rangeOctaves (o.range);
-            if (i > 0)
-                note += std::clamp (o.frequency, -7.0f, 7.0f);
+            note += mapping::frequencySemitones (i, o.frequency, p.osc3Control);
             if (i < 2)
                 note += pitchMod;
             note += osc[(size_t) i].drift (driftAmt);
@@ -174,8 +173,9 @@ void Synth::process (float* out, int numSamples)
             mix += v * gains[(size_t) i];
         }
         mix += nz * noiseGain;
-        // EXTERNAL INPUT: a cable in the jack, or (nothing plugged in) the main output fed back
-        mix += (extInput != nullptr ? extInput[n] * 2.0f : lastOutput) * extGain;
+        // EXTERNAL INPUT: a cable in the jack, or (nothing plugged in) the main output fed back through its coupling
+        fbState = lastOutput + (fbState - lastOutput) * fbCoef;
+        mix += extGain * (extInput != nullptr ? extInput[n] * mapping::kExternalInputGain : (lastOutput - fbState) * mapping::kFeedbackGain);
 
         // ---- mixer stage: drives into soft saturation; the lamp lights when it's pushed hard
         if (std::abs (mix) > 1.8)

@@ -20,7 +20,9 @@ juce::String formatSeconds (double s)
 
 juce::String formatHz (double hz)
 {
-    return hz >= 1000.0 ? juce::String (hz / 1000.0, hz >= 10000.0 ? 1 : 2) + " kHz" : (hz < 100.0 ? juce::String (hz, 1) : juce::String (juce::roundToInt (hz))) + " Hz";
+    if (hz >= 1000.0)
+        return juce::String (hz / 1000.0, hz >= 10000.0 ? 1 : 2) + " kHz";
+    return (hz < 10.0 ? juce::String (hz, 2) : hz < 100.0 ? juce::String (hz, 1) : juce::String (juce::roundToInt (hz))) + " Hz";
 }
 } // namespace
 
@@ -45,66 +47,50 @@ MainComponent::MainComponent (Engine& e) : engine (e)
         oscOn[(size_t) i] = std::make_unique<Rocker> (juce::String(), theme::colours::rockerBlue);
     }
 
-    // ---- bind every control to the patch
-    auto knob = [this] (PanelKnob& k, std::function<void (double)> set) {
-        k.onChange = [this, set] (double v) {
-            if (loading)
-                return;
-            set (v);
-            patchEdited();
-        };
-        addAndMakeVisible (k);
-    };
-    auto rocker = [this] (Rocker& r, std::function<void (bool)> set) {
-        r.onToggle = [this, set] (bool on) {
-            if (loading)
-                return;
-            set (on);
-            patchEdited();
-        };
-        addAndMakeVisible (r);
-    };
-    knob (tune, [this] (double v) { patch.tune = (float) v; });
-    knob (glide, [this] (double v) { patch.glide = (float) v; });
-    knob (modMix, [this] (double v) { patch.modMix = (float) v; });
-    rocker (oscMod, [this] (bool b) { patch.oscModulation = b; });
-    rocker (osc3Control, [this] (bool b) { patch.osc3Control = b; });
+    // ---- bind every control to its patch field, by ID (the panel table: also the MIDI learn names)
+    bind ("tune", tune);
+    bind ("glide", glide);
+    bind ("modMix", modMix);
+    bind ("oscModulation", oscMod);
+    bind ("osc3Control", osc3Control);
     for (int i = 0; i < 3; ++i)
     {
-        knob (*range[(size_t) i], [this, i] (double v) { patch.osc[(size_t) i].range = (int) v; });
-        knob (*wave[(size_t) i], [this, i] (double v) { patch.osc[(size_t) i].wave = (int) v; });
+        const auto n = "osc" + juce::String (i + 1);
+        bind (n + ".range", *range[(size_t) i]);
+        bind (n + ".wave", *wave[(size_t) i]);
         if (freq[(size_t) i])
-            knob (*freq[(size_t) i], [this, i] (double v) { patch.osc[(size_t) i].frequency = (float) v; });
-        knob (*oscVol[(size_t) i], [this, i] (double v) { patch.oscVolume[(size_t) i] = (float) v; });
-        rocker (*oscOn[(size_t) i], [this, i] (bool b) { patch.oscOn[(size_t) i] = b; });
+            bind (n + ".frequency", *freq[(size_t) i]);
+        bind (n + ".volume", *oscVol[(size_t) i]);
+        bind (n + ".on", *oscOn[(size_t) i]);
     }
-    knob (extVol, [this] (double v) { patch.extVolume = (float) v; });
-    rocker (extOn, [this] (bool b) { patch.extOn = b; });
-    knob (noiseVol, [this] (double v) { patch.noiseVolume = (float) v; });
-    rocker (noiseOn, [this] (bool b) { patch.noiseOn = b; });
-    rocker (pink, [this] (bool b) { patch.pinkNoise = b; });
-    extOn.setTooltip ("With nothing plugged in, EXTERNAL INPUT hears the main output: turn it up for feedback overdrive");
+    bind ("extVolume", extVol);
+    bind ("extOn", extOn);
+    bind ("noiseVolume", noiseVol);
+    bind ("noiseOn", noiseOn);
+    bind ("pinkNoise", pink);
+    bind ("cutoff", cutoff);
+    bind ("emphasis", emphasis);
+    bind ("contourAmount", contourAmt);
+    bind ("filterModulation", filterMod);
+    bind ("keyboardControl1", kb1);
+    bind ("keyboardControl2", kb2);
+    bind ("filterAttack", fAttack);
+    bind ("filterDecay", fDecay);
+    bind ("filterSustain", fSustain);
+    bind ("loudAttack", lAttack);
+    bind ("loudDecay", lDecay);
+    bind ("loudSustain", lSustain);
+    bind ("volume", volume);
+    bind ("outputOn", outputOn);
+    bind ("a440", a440);
+    bind ("glideOn", glideOn);
+    bind ("decayOn", decayOn);
+    jassert (controls.size() == panel::controls().size()); // every control in the table has its widget
     addAndMakeVisible (overload);
-
-    knob (cutoff, [this] (double v) { patch.cutoff = (float) v; });
-    knob (emphasis, [this] (double v) { patch.emphasis = (float) v; });
-    knob (contourAmt, [this] (double v) { patch.contourAmount = (float) v; });
-    rocker (filterMod, [this] (bool b) { patch.filterModulation = b; });
-    rocker (kb1, [this] (bool b) { patch.keyboardControl1 = b; });
-    rocker (kb2, [this] (bool b) { patch.keyboardControl2 = b; });
+    extOn.setTooltip ("With nothing plugged in, EXTERNAL INPUT hears the main output: turn it up for feedback overdrive");
     kb1.setTooltip ("Filter follows the keyboard: 1/3 (with 2: full tracking)");
     kb2.setTooltip ("Filter follows the keyboard: 2/3 (with 1: full tracking)");
-    knob (fAttack, [this] (double v) { patch.filterAttack = (float) v; });
-    knob (fDecay, [this] (double v) { patch.filterDecay = (float) v; });
-    knob (fSustain, [this] (double v) { patch.filterSustain = (float) v; });
-    knob (lAttack, [this] (double v) { patch.loudAttack = (float) v; });
-    knob (lDecay, [this] (double v) { patch.loudDecay = (float) v; });
-    knob (lSustain, [this] (double v) { patch.loudSustain = (float) v; });
-    knob (volume, [this] (double v) { patch.volume = (float) v; });
-    rocker (outputOn, [this] (bool b) { patch.outputOn = b; });
-    rocker (a440, [this] (bool b) { patch.a440 = b; });
-    rocker (glideOn, [this] (bool b) { patch.glideOn = b; });
-    rocker (decayOn, [this] (bool b) { patch.decayOn = b; });
+    osc3Control.setTooltip ("Off: oscillator 3 ignores the keyboard and its FREQUENCY knob spans +/-3 octaves (an LFO in LO)");
     decayOn.setTooltip ("On: notes release at the contours' DECAY time. Off: they stop almost at once");
 
     // ---- wheels and keyboard
@@ -166,7 +152,16 @@ MainComponent::MainComponent (Engine& e) : engine (e)
         range[(size_t) i]->slider.setPopupDisplayEnabled (true, true, nullptr);
         wave[(size_t) i]->slider.setPopupDisplayEnabled (true, true, nullptr);
         if (freq[(size_t) i])
-            unitText (*freq[(size_t) i], [] (double v) { return (v >= 0 ? "+" : "") + juce::String (v, 2) + " semitones"; });
+            unitText (*freq[(size_t) i], [this, i] (double v) {
+                if (i == 2 && ! patch.osc3Control)
+                {
+                    // free-running: the knob spans +/-3 octaves; show where oscillator 3 sits (its LFO rate in LO)
+                    const double st = mapping::frequencySemitones (2, (float) v, false);
+                    const double hz = mapping::noteToHz (mapping::kOsc3FreeNote + patch.tune + 12.0 * mapping::rangeOctaves (patch.osc[2].range) + st);
+                    return (st >= 0 ? "+" : "") + juce::String (st / 12.0, 2) + " octaves  (" + formatHz (hz) + ")";
+                }
+                return (v >= 0 ? "+" : "") + juce::String (v, 2) + " semitones";
+            });
         unitText (*oscVol[(size_t) i], [] (double v) { return juce::String (v, 1); });
     }
     unitText (cutoff, [] (double v) { return formatHz (mapping::cutoffHz ((float) v)); });
@@ -182,44 +177,6 @@ MainComponent::MainComponent (Engine& e) : engine (e)
     for (auto* k : { &extVol, &noiseVol })
         unitText (*k, [] (double v) { return juce::String (v, 1); });
 
-    // ---- MIDI learn: every knob and switch has an ID; right-click to assign a controller CC
-    registerControl ("tune", tune);
-    registerControl ("glide", glide);
-    registerControl ("modMix", modMix);
-    registerControl ("oscModulation", oscMod);
-    registerControl ("osc3Control", osc3Control);
-    for (int i = 0; i < 3; ++i)
-    {
-        const auto n = "osc" + juce::String (i + 1);
-        registerControl (n + ".range", *range[(size_t) i]);
-        registerControl (n + ".wave", *wave[(size_t) i]);
-        if (freq[(size_t) i])
-            registerControl (n + ".frequency", *freq[(size_t) i]);
-        registerControl (n + ".volume", *oscVol[(size_t) i]);
-        registerControl (n + ".on", *oscOn[(size_t) i]);
-    }
-    registerControl ("extVolume", extVol);
-    registerControl ("extOn", extOn);
-    registerControl ("noiseVolume", noiseVol);
-    registerControl ("noiseOn", noiseOn);
-    registerControl ("pinkNoise", pink);
-    registerControl ("cutoff", cutoff);
-    registerControl ("emphasis", emphasis);
-    registerControl ("contourAmount", contourAmt);
-    registerControl ("filterModulation", filterMod);
-    registerControl ("keyboardControl1", kb1);
-    registerControl ("keyboardControl2", kb2);
-    registerControl ("filterAttack", fAttack);
-    registerControl ("filterDecay", fDecay);
-    registerControl ("filterSustain", fSustain);
-    registerControl ("loudAttack", lAttack);
-    registerControl ("loudDecay", lDecay);
-    registerControl ("loudSustain", lSustain);
-    registerControl ("volume", volume);
-    registerControl ("outputOn", outputOn);
-    registerControl ("a440", a440);
-    registerControl ("glideOn", glideOn);
-    registerControl ("decayOn", decayOn);
     loadSettings();
     updateTooltips();
 
@@ -245,6 +202,16 @@ MainComponent::MainComponent (Engine& e) : engine (e)
             setSize (juce::jmax (1240, wh[0].getIntValue()), juce::jmax (720, wh[1].getIntValue()));
     }
     startTimerHz (30);
+
+    if (auto* reportPath = std::getenv ("FOURPOLE_SELFTEST"))
+    {
+        juce::Component::SafePointer<MainComponent> safe (this);
+        const juce::File report (reportPath);
+        juce::Timer::callAfterDelay (1500, [safe, report] {
+            if (safe != nullptr)
+                safe->runSelfTest (report);
+        });
+    }
 }
 
 MainComponent::~MainComponent()
@@ -272,43 +239,14 @@ void MainComponent::parentHierarchyChanged()
 void MainComponent::loadPatchIntoControls()
 {
     const juce::ScopedValueSetter<bool> svs (loading, true);
-    const auto& p = patch;
-    tune.setValue (p.tune);
-    glide.setValue (p.glide);
-    modMix.setValue (p.modMix);
-    oscMod.setToggleState (p.oscModulation, juce::dontSendNotification);
-    osc3Control.setToggleState (p.osc3Control, juce::dontSendNotification);
-    for (int i = 0; i < 3; ++i)
+    for (auto& [id, ref] : controls)
     {
-        range[(size_t) i]->setValue (p.osc[(size_t) i].range);
-        wave[(size_t) i]->setValue (p.osc[(size_t) i].wave);
-        if (freq[(size_t) i])
-            freq[(size_t) i]->setValue (p.osc[(size_t) i].frequency);
-        oscVol[(size_t) i]->setValue (p.oscVolume[(size_t) i]);
-        oscOn[(size_t) i]->setToggleState (p.oscOn[(size_t) i], juce::dontSendNotification);
+        const float v = ref.def->get (patch);
+        if (ref.knob != nullptr)
+            ref.knob->setValue (v);
+        else
+            ref.rocker->setToggleState (v >= 0.5f, juce::dontSendNotification);
     }
-    extVol.setValue (p.extVolume);
-    extOn.setToggleState (p.extOn, juce::dontSendNotification);
-    noiseVol.setValue (p.noiseVolume);
-    noiseOn.setToggleState (p.noiseOn, juce::dontSendNotification);
-    pink.setToggleState (p.pinkNoise, juce::dontSendNotification);
-    cutoff.setValue (p.cutoff);
-    emphasis.setValue (p.emphasis);
-    contourAmt.setValue (p.contourAmount);
-    filterMod.setToggleState (p.filterModulation, juce::dontSendNotification);
-    kb1.setToggleState (p.keyboardControl1, juce::dontSendNotification);
-    kb2.setToggleState (p.keyboardControl2, juce::dontSendNotification);
-    fAttack.setValue (p.filterAttack);
-    fDecay.setValue (p.filterDecay);
-    fSustain.setValue (p.filterSustain);
-    lAttack.setValue (p.loudAttack);
-    lDecay.setValue (p.loudDecay);
-    lSustain.setValue (p.loudSustain);
-    volume.setValue (p.volume);
-    outputOn.setToggleState (p.outputOn, juce::dontSendNotification);
-    a440.setToggleState (p.a440, juce::dontSendNotification);
-    glideOn.setToggleState (p.glideOn, juce::dontSendNotification);
-    decayOn.setToggleState (p.decayOn, juce::dontSendNotification);
     repaint (namePlate);
 }
 
@@ -498,39 +436,44 @@ void MainComponent::toggleRecording()
 
 // ---------------------------------------------------------------- MIDI learn
 
-void MainComponent::registerControl (const juce::String& id, PanelKnob& k)
+void MainComponent::bind (const juce::String& id, PanelKnob& k)
 {
-    controls[id].knob = &k;
+    const auto* def = panel::find (id);
+    jassert (def != nullptr && ! def->isSwitch());
+    if (def == nullptr)
+        return;
+    controls[id] = { &k, nullptr, def };
+    k.onChange = [this, def] (double v) {
+        if (loading)
+            return;
+        def->set (patch, (float) v);
+        patchEdited();
+    };
     k.slider.onRightClick = [this, id] { showControlMenu (id); };
+    addAndMakeVisible (k);
 }
 
-void MainComponent::registerControl (const juce::String& id, Rocker& r)
+void MainComponent::bind (const juce::String& id, Rocker& r)
 {
-    controls[id].rocker = &r;
+    const auto* def = panel::find (id);
+    jassert (def != nullptr && def->isSwitch());
+    if (def == nullptr)
+        return;
+    controls[id] = { nullptr, &r, def };
+    r.onToggle = [this, def] (bool on) {
+        if (loading)
+            return;
+        def->set (patch, on ? 1.0f : 0.0f);
+        patchEdited();
+    };
     r.onRightClick = [this, id] { showControlMenu (id); };
+    addAndMakeVisible (r);
 }
 
 juce::String MainComponent::controlName (const juce::String& id) const
 {
-    auto it = controls.find (id);
-    if (it == controls.end())
-        return id;
-    juce::String n = it->second.knob != nullptr ? it->second.knob->getName() : it->second.rocker->getButtonText();
-    n = n.replace ("\n", " ");
-    if (n.isEmpty())
-        n = id;
-    // disambiguate the repeated names (contours, oscillators, mixer switches)
-    if (id.startsWith ("filter") && (id.endsWith ("Attack") || id.endsWith ("Decay") || id.endsWith ("Sustain")))
-        n = "FILTER " + n;
-    else if (id.startsWith ("loud"))
-        n = "LOUDNESS " + n;
-    else if (id.startsWith ("osc") && id.containsChar ('.'))
-        n = "OSC " + id.substring (3, 4) + " " + (id.endsWith (".on") ? juce::String ("ON/OFF") : n);
-    else if (id == "extOn")
-        n = "EXTERNAL INPUT ON/OFF";
-    else if (id == "noiseOn")
-        n = "NOISE ON/OFF";
-    return n;
+    const auto* def = panel::find (id);
+    return def != nullptr ? def->name : id;
 }
 
 void MainComponent::updateTooltips()
@@ -652,8 +595,13 @@ void MainComponent::timerCallback()
     keyboard.refreshExternal();
     if (! pitchWheel.isBeingDragged())
         pitchWheel.setValue (engine.getMidiPitchBend());
-    if (! modWheel.isBeingDragged() && std::abs (engine.getMidiModWheel() - modWheel.getValue()) > 0.001f && engine.getMidiModWheel() > 0.0f)
-        modWheel.setValue (engine.getMidiModWheel());
+    const float midiMod = engine.getMidiModWheel();
+    if (! juce::exactlyEqual (midiMod, lastMidiMod)) // a controller's wheel moved (all the way back to 0 too)
+    {
+        lastMidiMod = midiMod;
+        if (! modWheel.isBeingDragged())
+            modWheel.setValue (midiMod);
+    }
     if (messageUntil != 0 && juce::Time::getMillisecondCounter() > messageUntil)
     {
         messageUntil = 0;
@@ -708,6 +656,182 @@ bool MainComponent::keyStateChanged (bool)
         }
     }
     return handled;
+}
+
+// ---------------------------------------------------------------- self-test
+
+void MainComponent::runSelfTest (const juce::File& reportFile)
+{
+    settings.reset(); // nothing the test does is saved into the user's settings
+    auto lines = std::make_shared<juce::StringArray>();
+    auto failures = std::make_shared<int> (0);
+    auto log = [lines] (const juce::String& m) { lines->add (m); };
+    auto fail = [lines, failures] (const juce::String& m) { lines->add ("FAIL  " + m); ++*failures; };
+    auto near = [] (float a, float b) { return std::abs (a - b) < 1.0e-3f; };
+    // turn / flip a widget through its own callbacks (the ones a drag or a click runs)
+    auto move = [] (const ControlRef& ref, float v) {
+        if (ref.knob != nullptr)
+            ref.knob->slider.setValue (v, juce::sendNotificationSync);
+        else
+            ref.rocker->setToggleState (v >= 0.5f, juce::sendNotificationSync);
+    };
+    auto shown = [] (const ControlRef& ref) {
+        return ref.knob != nullptr ? (float) ref.knob->slider.getValue() : (ref.rocker->getToggleState() ? 1.0f : 0.0f);
+    };
+
+    log ("-- every control in the panel table has a widget");
+    for (auto& c : panel::controls())
+        if (controls.count (c.id) == 0)
+            fail (c.id + ": no widget");
+
+    log ("-- turning each widget changes its own field in the engine's patch, and nothing else");
+    for (auto& c : panel::controls())
+    {
+        auto it = controls.find (c.id);
+        if (it == controls.end())
+            continue;
+        const auto& ref = it->second;
+        const Patch before = engine.getPatch();
+        const float was = c.get (before);
+        const float target = was <= (c.min + c.max) * 0.5f ? c.max : c.min;
+        move (ref, target);
+        const Patch after = engine.getPatch();
+        if (! near (c.get (after), target))
+            fail (c.id + ": widget set to " + juce::String (target) + ", engine patch has " + juce::String (c.get (after)));
+        for (auto& other : panel::controls())
+            if (&other != &c && ! near (other.get (after), other.get (before)))
+                fail (c.id + ": also changed " + other.id);
+        const auto readout = ref.knob != nullptr ? ref.knob->slider.getTextFromValue (target) : juce::String (target > 0.5f ? "ON" : "OFF");
+        log ("ok    " + c.id.paddedRight (' ', 18) + juce::String (was, 2) + " -> " + juce::String (target, 2) + "    " + readout);
+        move (ref, was);
+        if (! near (c.get (engine.getPatch()), was))
+            fail (c.id + ": didn't go back to " + juce::String (was));
+    }
+
+    log ("-- MIDI learn: each control takes a CC and follows it");
+    {
+        const auto savedMap = midiMap;
+        constexpr int testCC = 102;
+        for (auto& c : panel::controls())
+        {
+            auto it = controls.find (c.id);
+            if (it == controls.end())
+                continue;
+            const float was = c.get (engine.getPatch());
+            const bool up = was <= (c.min + c.max) * 0.5f;
+            learnTarget = c.id;
+            applyController (testCC, up ? 127 : 0);
+            const float now = c.get (engine.getPatch());
+            if (midiMap.controlFor (testCC) != c.id)
+                fail (c.id + ": CC " + juce::String (testCC) + " wasn't assigned");
+            if (! near (now, up ? c.max : c.min))
+                fail (c.id + ": CC value " + juce::String (up ? 127 : 0) + " set it to " + juce::String (now));
+            if (! near (shown (it->second), now))
+                fail (c.id + ": the widget doesn't show the CC's value");
+            move (it->second, was);
+        }
+        midiMap = savedMap;
+        updateTooltips();
+        log ("ok    " + juce::String ((int) panel::controls().size()) + " controls");
+    }
+
+    log ("-- < and > load every factory patch into the engine and onto every widget");
+    {
+        const auto savedPatch = patch;
+        const int savedIndex = patchIndex;
+        const auto savedFile = currentFile;
+        for (int k = 0; k < (int) factoryPatches().size(); ++k)
+        {
+            patchIndex = k - 1;
+            stepPatch (1);
+            const auto& fp = factoryPatches()[(size_t) k];
+            if (juce::JSON::toString (engine.getPatch().toJson()) != juce::JSON::toString (fp.toJson()))
+                fail (fp.name + ": the engine didn't get the patch");
+            for (auto& [id, ref] : controls)
+                if (! near (shown (ref), ref.def->get (fp)))
+                    fail (fp.name + ": " + id + " shows " + juce::String (shown (ref)) + ", patch has " + juce::String (ref.def->get (fp)));
+        }
+        patch = savedPatch;
+        patchIndex = savedIndex;
+        currentFile = savedFile;
+        loadPatchIntoControls();
+        engine.setPatch (patch);
+        log ("ok    " + juce::String ((int) factoryPatches().size()) + " patches");
+    }
+
+    log ("-- POWER and REC");
+    powerSw.setToggleState (false, juce::sendNotificationSync);
+    if (engine.isPowered())
+        fail ("POWER off didn't reach the engine");
+    powerSw.setToggleState (true, juce::sendNotificationSync);
+    if (! engine.isPowered())
+        fail ("POWER on didn't reach the engine");
+    const auto recordings = juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("Fourpole Recordings");
+    const bool recordingsExisted = recordings.isDirectory();
+    toggleRecording();
+    if (! engine.isRecording())
+        fail ("REC didn't start a recording");
+
+    // ---- then by ear (well, by meter): the audio thread hears the widgets
+    struct Step
+    {
+        int waitMs;
+        std::function<void()> fn;
+    };
+    auto steps = std::make_shared<std::vector<Step>>();
+    auto level = [this] { return engine.getOutputLevel(); };
+    auto expectLevel = [level, log, fail] (const juce::String& what, bool sounding) {
+        const float l = level();
+        if (sounding ? l > 0.01f : l < 1.0e-4f)
+            log ("ok    " + what + "  (peak " + juce::String (l, 4) + ")");
+        else
+            fail (what + "  (peak " + juce::String (l, 4) + ")");
+    };
+    auto& vol = controls["volume"];
+    auto& out = controls["outputOn"];
+    auto& ref440 = controls["a440"];
+    const float volumeWas = (float) vol.knob->slider.getValue();
+    steps->push_back ({ 0, [this, log] { log ("-- sound"); engine.noteOn (48, 100); } });
+    steps->push_back ({ 500, [=] { expectLevel ("a held key sounds", true); move (vol, 0.0f); } });
+    steps->push_back ({ 300, [=] { expectLevel ("VOLUME at 0 is silent", false); move (vol, volumeWas); } });
+    steps->push_back ({ 300, [=] { expectLevel ("VOLUME back up sounds", true); move (out, 0.0f); } });
+    steps->push_back ({ 300, [=] { expectLevel ("MAIN OUTPUT off is silent", false); move (out, 1.0f); } });
+    steps->push_back ({ 300, [=, this] { expectLevel ("MAIN OUTPUT on sounds", true); powerSw.setToggleState (false, juce::sendNotificationSync); } });
+    steps->push_back ({ 300, [=, this] { expectLevel ("POWER off is silent", false); powerSw.setToggleState (true, juce::sendNotificationSync); } });
+    steps->push_back ({ 300, [=] { expectLevel ("POWER on again clears the held key", false); move (ref440, 1.0f); } });
+    steps->push_back ({ 300, [=, this] { expectLevel ("A-440 sounds with no key held", true); move (ref440, 0.0f); engine.noteOff (48); } });
+    steps->push_back ({ 300, [=, this] {
+        const auto f = engine.stopRecording();
+        recBtn.setToggleState (false, juce::dontSendNotification);
+        if (! f.existsAsFile() || f.getSize() < 10000)
+            fail ("REC didn't write a recording");
+        else
+            log ("ok    REC wrote " + juce::String (f.getSize() / 1024) + " KB");
+        f.deleteFile();
+        if (! recordingsExisted && recordings.getNumberOfChildFiles (juce::File::findFilesAndDirectories) == 0)
+            recordings.deleteFile(); // leave ~/Music as we found it
+        lines->add ("");
+        lines->add (*failures == 0 ? juce::String ("ALL PASSED") : juce::String (*failures) + " FAILED");
+        reportFile.replaceWithText (lines->joinIntoString ("\n") + "\n");
+        juce::JUCEApplicationBase::quit();
+    } });
+
+    // each step runs after its wait, then schedules the next
+    struct Runner
+    {
+        static void next (std::shared_ptr<std::vector<Step>> steps, size_t i, juce::Component::SafePointer<MainComponent> safe)
+        {
+            if (safe == nullptr || i >= steps->size())
+                return;
+            juce::Timer::callAfterDelay (juce::jmax (1, (*steps)[i].waitMs), [steps, i, safe] {
+                if (safe == nullptr)
+                    return;
+                (*steps)[i].fn();
+                next (steps, i + 1, safe);
+            });
+        }
+    };
+    Runner::next (steps, 0, this);
 }
 
 // ---------------------------------------------------------------- layout

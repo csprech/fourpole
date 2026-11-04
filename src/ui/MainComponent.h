@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/PanelControls.h"
 #include "engine/Engine.h"
 #include "ui/Controls.h"
 #include "ui/Keyboard.h"
@@ -36,14 +37,17 @@ private:
     void showAudioSettings();
     juce::File patchFolder() const;
     void toggleRecording();
-    void registerControl (const juce::String& id, PanelKnob& k);
-    void registerControl (const juce::String& id, Rocker& r);
+    /** Connects a widget to its control in the panel table: edits, patch loads and MIDI learn all go by this ID. */
+    void bind (const juce::String& id, PanelKnob& k);
+    void bind (const juce::String& id, Rocker& r);
     void showControlMenu (const juce::String& id);
     void applyController (int cc, int value);
     void saveSettings();
     void loadSettings();
     juce::String controlName (const juce::String& id) const;
     void updateTooltips();
+    /** FOURPOLE_SELFTEST=/path/report.txt: works every widget, checks the engine's patch follows, then quits. */
+    void runSelfTest (const juce::File& report);
 
     Engine& engine;
     Patch patch;
@@ -116,10 +120,12 @@ private:
     {
         PanelKnob* knob = nullptr;
         Rocker* rocker = nullptr;
+        const panel::Control* def = nullptr;
     };
     std::map<juce::String, ControlRef> controls;
     MidiMap midiMap;
     juce::String learnTarget;
     std::unique_ptr<juce::PropertiesFile> settings;
+    float lastMidiMod = 0.0f; // the on-screen MOD. wheel follows a MIDI controller's
 };
 } // namespace fourpole

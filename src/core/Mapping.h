@@ -56,6 +56,17 @@ inline double mixerGain (float knob)
     return 1.2 * v * v;
 }
 
+/** EXTERNAL INPUT with nothing plugged in: how much of the main output comes back into the mixer
+    (times mixerGain of the EXT knob), enough that EXT and the main VOLUME up overload the mixer. */
+constexpr double kFeedbackGain = 3.0;
+/** The normalled feedback path is AC-coupled (the output's coupling, and the input jack's). Modelled as
+    a high-pass on the fed-back signal; it also stops a hot loop latching into a subsonic rumble below
+    the notes, where the ladder passes the loop in phase. */
+constexpr double kFeedbackHighPassHz = 50.0;
+/** EXTERNAL INPUT with a cable in: a line-level source peaking around -12 dBFS, at EXT 10, drives the
+    mixer about as hard as an oscillator at 10. */
+constexpr double kExternalInputGain = 4.4;
+
 /** Output volume 0..10 -> gain. */
 inline double outputGain (float knob)
 {
@@ -67,7 +78,19 @@ inline double outputGain (float knob)
 constexpr double kPitchModSemitones = 7.0;
 constexpr double kFilterModOctaves = 2.5;
 
-/** Pitch oscillator 3 rests at when OSC 3 CONTROL is off (middle C at 8'). */
-constexpr double kOsc3FreeNote = 60.0;
+/** Where oscillator 3 rests when OSC 3 CONTROL is off: about 175 Hz at 8' with FREQUENCY centred
+    (an owner's measurement of a Model D: 2' ~700 Hz, 4' ~350, 8' ~175, 16' ~87, 32' ~44). */
+constexpr double kOsc3FreeNote = 53.0; // F3, 174.6 Hz
+
+/** FREQUENCY knob (-7..+7 on the panel) -> semitones. Oscillators 2 and 3 detune by about +/-7 semitones;
+    with OSC 3 CONTROL off the hardware switches oscillator 3's knob to a much wider span, about
+    +/-3 octaves, so in LO it sweeps from a slow LFO (~0.3 Hz) to a fast one (~20 Hz). */
+inline double frequencySemitones (int oscIndex, float knob, bool osc3Control)
+{
+    const double k = std::clamp (knob, -7.0f, 7.0f);
+    if (oscIndex == 2 && ! osc3Control)
+        return k / 7.0 * 36.0;
+    return oscIndex > 0 ? k : 0.0;
+}
 
 } // namespace fourpole::mapping

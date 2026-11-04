@@ -183,7 +183,7 @@ const std::vector<Patch>& factoryPatches()
         make ("Lead Saw", [] (Patch& p) {
             p.osc[0] = { (int) R::Ft8, 0, (int) W::Saw };
             p.osc[1] = { (int) R::Ft8, 0.12f, (int) W::Saw };
-            p.osc[2] = { (int) R::Lo, 3.0f, (int) W::Triangle };
+            p.osc[2] = { (int) R::Lo, 1.95f, (int) W::Triangle }; // ~4.9 Hz vibrato
             p.oscVolume = { 8, 8, 0 };
             p.oscOn = { true, true, false };
             p.osc3Control = false; p.oscModulation = true; p.modMix = 0;
@@ -220,7 +220,7 @@ const std::vector<Patch>& factoryPatches()
         make ("Sub Wobble", [] (Patch& p) {
             p.osc[0] = { (int) R::Ft32, 0, (int) W::Square };
             p.osc[1] = { (int) R::Ft16, 0.04f, (int) W::Saw };
-            p.osc[2] = { (int) R::Lo, -2.0f, (int) W::Triangle };
+            p.osc[2] = { (int) R::Lo, 1.0f, (int) W::Triangle }; // ~3.7 Hz wobble
             p.oscVolume = { 9, 6, 0 };
             p.oscOn = { true, true, false };
             p.osc3Control = false; p.filterModulation = true; p.modMix = 0;
@@ -237,7 +237,7 @@ const std::vector<Patch>& factoryPatches()
         make ("Trill Lead", [] (Patch& p) {
             p.osc[0] = { (int) R::Ft8, 0, (int) W::WidePulse };
             p.osc[1] = { (int) R::Ft4, 0.05f, (int) W::Triangle };
-            p.osc[2] = { (int) R::Lo, 4.0f, (int) W::Square };
+            p.osc[2] = { (int) R::Lo, 2.15f, (int) W::Square }; // ~5.2 Hz trill
             p.oscVolume = { 8, 4, 0 };
             p.oscOn = { true, true, false };
             p.osc3Control = false; p.oscModulation = true;

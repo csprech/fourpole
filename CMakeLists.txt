@@ -16,6 +16,7 @@ set(FOURPOLE_CORE_SOURCES
   src/core/Synth.cpp
   src/core/Patch.cpp
   src/core/MidiMap.cpp
+  src/core/PanelControls.cpp
 )
 
 set(FOURPOLE_JUCE_DEFS
@@ -63,7 +64,8 @@ target_sources(FourpoleTests PRIVATE
   ${FOURPOLE_CORE_SOURCES}
   tests/TestMain.cpp
   tests/DspTests.cpp
-  tests/SynthTests.cpp)
+  tests/SynthTests.cpp
+  tests/ControlTests.cpp)
 target_include_directories(FourpoleTests PRIVATE src)
 target_compile_definitions(FourpoleTests PRIVATE ${FOURPOLE_JUCE_DEFS})
 target_link_libraries(FourpoleTests PRIVATE
