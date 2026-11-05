@@ -17,6 +17,10 @@ class MainComponent : public juce::Component, public juce::FileDragAndDropTarget
     friend struct GpuiBridge; // (the GPUI front end drives this panel off-screen: bridge/FourpoleBridge.cpp)
 
 public:
+    /** Whether a key is held (a GPUI front end answers this; otherwise the computer's keyboard). */
+    static inline std::function<bool (int)> keyHook;
+    static bool keyIsDown (int c) { return keyHook ? keyHook (c) : juce::KeyPress::isKeyCurrentlyDown (c); }
+
     explicit MainComponent (Engine& engine);
     ~MainComponent() override;
 
