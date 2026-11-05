@@ -11,6 +11,8 @@ namespace fourpole
 {
 class Keyboard : public juce::Component
 {
+    friend struct GpuiBridge;
+
 public:
     static constexpr int kLowest = 41, kHighest = 84; // F2 .. C6
 

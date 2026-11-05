@@ -94,6 +94,8 @@ private:
 /** Indicator lamp (e.g. OVERLOAD). */
 class Lamp : public juce::Component
 {
+    friend struct GpuiBridge;
+
 public:
     explicit Lamp (const juce::String& text, juce::Colour c = theme::colours::lampRed) : label (text), colour (c)
     {
@@ -114,6 +116,8 @@ private:
 /** Pitch or modulation wheel: a ribbed wheel in a slot; drag up/down. The pitch wheel springs back to centre. */
 class Wheel : public juce::Component
 {
+    friend struct GpuiBridge;
+
 public:
     Wheel (const juce::String& text, bool bipolarSpring) : label (text), spring (bipolarSpring) {}
     std::function<void (float)> onChange;

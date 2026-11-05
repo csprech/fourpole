@@ -14,6 +14,8 @@ namespace fourpole
     modifiers, output), the patch bar on the top rail, the wheels and the 44-key keyboard. */
 class MainComponent : public juce::Component, public juce::FileDragAndDropTarget, private juce::Timer
 {
+    friend struct GpuiBridge; // (the GPUI front end drives this panel off-screen: bridge/FourpoleBridge.cpp)
+
 public:
     explicit MainComponent (Engine& engine);
     ~MainComponent() override;

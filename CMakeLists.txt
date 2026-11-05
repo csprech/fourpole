@@ -48,6 +48,25 @@ target_link_libraries(Fourpole PRIVATE
   juce::juce_recommended_warning_flags)
 endif()
 
+# ---------------------------------------------------------------- the GPUI front end's bridge
+# A static library with the instrument (engine, and the JUCE panel used off-screen as controller and renderer)
+# behind a C interface (bridge/FourpoleBridge.h). gpui/build.rs builds and links it.
+option(FOURPOLE_BUILD_BRIDGE "Build the bridge for the GPUI front end" OFF)
+if(FOURPOLE_BUILD_BRIDGE)
+  add_library(fourpole_bridge STATIC ${FOURPOLE_CORE_SOURCES} ${FOURPOLE_UI_SOURCES} bridge/FourpoleBridge.cpp)
+  target_include_directories(fourpole_bridge PRIVATE src)
+  target_compile_definitions(fourpole_bridge PRIVATE ${FOURPOLE_JUCE_DEFS} JUCE_STANDALONE_APPLICATION=0
+    JUCE_APPLICATION_NAME_STRING="Fourpole" JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}")
+  target_link_libraries(fourpole_bridge PRIVATE
+    juce::juce_audio_utils
+    juce::juce_audio_processors
+    juce::juce_audio_devices
+    juce::juce_gui_extra
+    PUBLIC
+    juce::juce_recommended_config_flags)
+  set_target_properties(fourpole_bridge PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+
 # ---------------------------------------------------------------- tests
 juce_add_console_app(FourpoleTests PRODUCT_NAME "FourpoleTests")
 target_sources(FourpoleTests PRIVATE
