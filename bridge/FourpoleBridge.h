@@ -45,6 +45,18 @@ const char* fp_state_json (FpPanel*);
 /* The patch bar. */
 void fp_command (FpPanel*, const char* name); /* prev, next, save, saveAs, load, setup, audio, help, rec */
 
+/* Where the panel is on screen, so its menus and pop-ups open over it: the window's content (its top left in screen
+   points; or worked out from a real mouse event at x, y in the window), and the panel in the window (its top left in
+   window points, and window points per panel pixel). */
+void fp_window_origin (FpPanel*, float x, float y);
+void fp_window_origin_from_pointer (FpPanel*, float x, float y);
+void fp_place (FpPanel*, float x, float y, float scale);
+/* What the part under x, y (panel pixels) is, for a tooltip ("" if nothing says). */
+const char* fp_tooltip (FpPanel*, float x, float y);
+/* (the self-test) 0: no menu or window open; 1: one is open over the panel; 2: elsewhere. And closing them. */
+int fp_menu_check (FpPanel*);
+void fp_close_menus (FpPanel*);
+
 #ifdef __cplusplus
 }
 #endif

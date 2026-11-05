@@ -8,6 +8,49 @@
 
 namespace fourpole
 {
+/** A window that isn't one: the peer JUCE gives the panel. It never draws (GPUI shows the panel), but it sits where
+    the panel is on screen, so JUCE delivers the mouse the normal way (with mouse listeners, hover, double-clicks and
+    buttons as on screen) and opens menus and pop-ups over the panel, at its size. */
+struct HeadlessPeer final : juce::ComponentPeer
+{
+    HeadlessPeer (juce::Component& c, int flags) : juce::ComponentPeer (c, flags) {}
+    juce::Rectangle<int> bounds;
+
+    void* getNativeHandle() const override { return nullptr; }
+    void setVisible (bool) override {}
+    void setTitle (const juce::String&) override {}
+    void setBounds (const juce::Rectangle<int>& r, bool) override { bounds = r; }
+    juce::Rectangle<int> getBounds() const override { return bounds; }
+    juce::Point<float> localToGlobal (juce::Point<float> p) override { return p + bounds.getPosition().toFloat(); }
+    juce::Point<float> globalToLocal (juce::Point<float> p) override { return p - bounds.getPosition().toFloat(); }
+    void setMinimised (bool) override {}
+    bool isMinimised() const override { return false; }
+    bool isShowing() const override { return true; }
+    void setFullScreen (bool) override {}
+    bool isFullScreen() const override { return false; }
+    void setIcon (const juce::Image&) override {}
+    bool contains (juce::Point<int> p, bool) const override { return bounds.withZeroOrigin().contains (p); }
+    OptionalBorderSize getFrameSizeIfPresent() const override { return {}; }
+    juce::BorderSize<int> getFrameSize() const override { return {}; }
+    bool setAlwaysOnTop (bool) override { return true; }
+    void toFront (bool) override {}
+    void toBehind (juce::ComponentPeer*) override {}
+    bool isFocused() const override { return true; }
+    void grabFocus() override {}
+    void repaint (const juce::Rectangle<int>&) override {}
+    void performAnyPendingRepaintsNow() override {}
+    void setAlpha (float) override {}
+    juce::StringArray getAvailableRenderingEngines() override { return { "Software Renderer" }; }
+    void textInputRequired (juce::Point<int>, juce::TextInputTarget&) override {}
+};
+
+/** What holds the panel on the (pretend) desktop: in screen points, with the panel scaled into it. */
+struct Mount final : juce::Component
+{
+    Mount() { setAccessible (false); }
+    juce::ComponentPeer* createNewPeer (int flags, void*) override { return new HeadlessPeer (*this, flags); }
+};
+
 struct GpuiBridge
 {
     struct Part
@@ -26,6 +69,10 @@ struct GpuiBridge
     std::unique_ptr<juce::ScopedJuceInitialiser_GUI> juce;
     std::unique_ptr<Engine> engine;
     std::unique_ptr<MainComponent> panel;
+    std::unique_ptr<Mount> mount; // (where the panel is on screen: its menus and pop-ups open over it)
+    juce::Point<float> windowOrigin, originFix, placedAt;
+    float placedScale = 0.0f;
+    std::string tip;
     std::vector<Part> parts;
     std::string parts_json, state_json;
     std::array<bool, 128> computerNotes {};
@@ -36,6 +83,11 @@ struct GpuiBridge
         engine = std::make_unique<Engine>();
         panel = std::make_unique<MainComponent> (*engine);
         panel->setSize (width, height);
+        mount = std::make_unique<Mount>();
+        mount->setSize (width, height);
+        mount->addAndMakeVisible (*panel);
+        mount->setVisible (true);
+        mount->addToDesktop (0); // (a peer that never draws)
         collectParts();
     }
 
@@ -43,6 +95,9 @@ struct GpuiBridge
     {
         if (panel != nullptr)
             panel->prepareToQuit();
+        juce::PopupMenu::dismissAllActiveMenus();
+        mount->removeChildComponent (panel.get());
+        mount.reset();
         panel.reset();
         engine.reset();
     }
@@ -394,6 +449,48 @@ struct GpuiBridge
         return 0;
     }
 
+    /** Where the panel is in the window now (its top left, in window points, and points per panel pixel). */
+    void place (float x, float y, float scale)
+    {
+        const auto origin = windowOrigin + originFix + juce::Point<float> (x, y);
+        if (scale <= 0.0f || (origin == placedAt && scale == placedScale))
+            return;
+        placedAt = origin;
+        placedScale = scale;
+        const auto topLeft = origin.toInt();
+        panel->setTransform (juce::AffineTransform::scale (scale).translated (origin - topLeft.toFloat()));
+        mount->setBounds (topLeft.x, topLeft.y, (int) std::ceil ((float) panel->getWidth() * scale + 1.0f),
+                          (int) std::ceil ((float) panel->getHeight() * scale + 1.0f));
+    }
+
+    void originFromPointer (float x, float y)
+    {
+        // (from a real mouse event: where the pointer is on screen, less where it is in the window)
+        originFix = juce::Desktop::getInstance().getMainMouseSource().getRawScreenPosition() - juce::Point<float> (x, y) - windowOrigin;
+    }
+
+    /** What the part under x, y (panel pixels) is: its tooltip, its name, or a button's text. */
+    const char* tooltip (float x, float y)
+    {
+        tip.clear();
+        for (auto* c = panel->getComponentAt (juce::Point<float> (x, y).roundToInt()); c != nullptr && c != mount.get(); c = c->getParentComponent())
+        {
+            juce::String t;
+            if (auto* tc = dynamic_cast<juce::TooltipClient*> (c))
+                t = tc->getTooltip();
+            if (t.isEmpty())
+                t = c->getName().replace ("\n", " ").trim();
+            if (auto* b = dynamic_cast<juce::Button*> (c); b != nullptr && t.isEmpty())
+                t = b->getButtonText().trim();
+            if (t.isNotEmpty() && c != panel.get())
+            {
+                tip = t.toStdString();
+                break;
+            }
+        }
+        return tip.c_str();
+    }
+
     void command (const char* name)
     {
         auto& mc = *panel;
@@ -441,4 +538,22 @@ void fp_set_wheel (FpPanel* p, int which, float v) { p->b.set (which == 0 ? "pit
 int fp_key_event (FpPanel* p, const char* chars, int down, int command, int shift) { return p->b.keyEvent (chars, down != 0, command != 0, shift != 0); }
 const char* fp_state_json (FpPanel* p) { return p->b.stateJson(); }
 void fp_command (FpPanel* p, const char* name) { p->b.command (name); }
+void fp_window_origin (FpPanel* p, float x, float y) { p->b.windowOrigin = { x, y }; }
+void fp_window_origin_from_pointer (FpPanel* p, float x, float y) { p->b.originFromPointer (x, y); }
+void fp_place (FpPanel* p, float x, float y, float scale) { p->b.place (x, y, scale); }
+const char* fp_tooltip (FpPanel* p, float x, float y) { return p->b.tooltip (x, y); }
+int fp_menu_check (FpPanel* p)
+{
+    // 0: nothing open; 1: a menu or window is open over the panel; 2: open somewhere else
+    auto* mcm = juce::ModalComponentManager::getInstanceWithoutCreating();
+    if (mcm == nullptr || mcm->getNumModalComponents() == 0)
+        return 0;
+    return p->b.mount->getScreenBounds().intersects (mcm->getModalComponent (0)->getScreenBounds()) ? 1 : 2;
+}
+void fp_close_menus (FpPanel*)
+{
+    juce::PopupMenu::dismissAllActiveMenus();
+    if (auto* mcm = juce::ModalComponentManager::getInstanceWithoutCreating())
+        mcm->cancelAllModalComponents();
+}
 }

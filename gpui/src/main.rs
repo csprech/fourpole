@@ -15,7 +15,7 @@ use gpui::{
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Deserialize, Clone)]
 struct Rect {
@@ -94,6 +94,13 @@ struct Fourpole {
     drag: Option<Drag>,
     focus: FocusHandle,
     frame: (f32, f32, f32), // scale, x and y offset of the panel in the window
+    retired: Vec<(u64, Arc<RenderImage>)>, // pictures let go of, to take out of the GPU's atlas (with the frame they went)
+    frames: u64,
+    dropped: usize,
+    pointer: Option<(f32, f32)>, // where the mouse rests, in panel pixels (None: off the panel)
+    pointer_at: (f32, f32),      // and in the window
+    pointer_still: Instant,
+    tip: Option<(String, (f32, f32))>,
 }
 
 impl Fourpole {
@@ -115,12 +122,31 @@ impl Fourpole {
             drag: None,
             focus: cx.focus_handle(),
             frame: (1.0, 0.0, 0.0),
+            retired: Vec::new(),
+            frames: 0,
+            dropped: 0,
+            pointer: None,
+            pointer_at: (0.0, 0.0),
+            pointer_still: Instant::now(),
+            tip: None,
         };
         this.refresh();
         if let Ok(report) = std::env::var("FOURPOLE_GPUI_SELFTEST") {
             cx.spawn(async move |this, cx| {
                 Timer::after(Duration::from_millis(1500)).await;
                 let mut lines = Vec::new();
+                // the SETUP button's menu opens over the panel (not at the corner of the screen)
+                let _ = this.update(cx, |this, _| this.panel.command("setup"));
+                Timer::after(Duration::from_millis(400)).await;
+                let _ = this.update(cx, |this, _| {
+                    let m = this.panel.menu_check();
+                    lines.push(format!("{}    the SETUP menu opens over the panel ({m})", if m == 1 { "ok  " } else { "FAIL" }));
+                    this.panel.close_menus();
+                    let rec = this.layout.buttons.iter().find(|b| b.command == "rec").cloned();
+                    let tip = rec.map(|b| this.panel.tooltip(b.x + b.w * 0.5, b.y + b.h * 0.5)).unwrap_or_default();
+                    lines.push(format!("{}    the record button's tooltip: \"{tip}\"", if tip.contains("Record") { "ok  " } else { "FAIL" }));
+                });
+                Timer::after(Duration::from_millis(200)).await;
                 let _ = this.update(cx, |this, cx| this.self_test_controls(&mut lines, cx));
                 // a key clicked with the mouse sounds
                 let _ = this.update(cx, |this, cx| this.click_key(60, true, cx));
@@ -132,6 +158,21 @@ impl Fourpole {
                     let level = this.state.level;
                     lines.push(format!("{}    a key clicked plays: level {:.3}", if level > 0.01 { "ok  " } else { "FAIL" }, level));
                     this.click_key(60, false, cx);
+                });
+                // (as when the window changes size: every picture drawn again, and the old ones let go of)
+                let (before, start) = this.update(cx, |this, _| {
+                    this.retire_sprites();
+                    (this.dropped, this.frames)
+                }).unwrap_or((0, 0));
+                for _ in 0..60 {
+                    Timer::after(Duration::from_millis(100)).await;
+                    if this.update(cx, |this, _| this.frames >= start + 3).unwrap_or(true) {
+                        break;
+                    }
+                }
+                let _ = this.update(cx, |this, cx| {
+                    let d = this.dropped - before;
+                    lines.push(format!("{}    old pictures are let go of ({d} dropped, {} waiting)", if d > 0 && this.retired.len() < 64 { "ok  " } else { "FAIL" }, this.retired.len()));
                     let fails = lines.iter().filter(|l| l.starts_with("FAIL")).count();
                     lines.push(String::new());
                     lines.push(if fails == 0 { "ALL PASSED".into() } else { format!("{fails} FAILED") });
@@ -212,8 +253,19 @@ impl Fourpole {
         }
         let (w, h) = ((self.layout.width * scale).ceil() as usize, (self.layout.height * scale).ceil() as usize);
         let img = Self::image(w, h, self.panel.render_background(scale, w, h));
-        self.background = Some((key, img.clone()));
+        if let Some((_, old)) = self.background.replace((key, img.clone())) {
+            self.retired.push((self.frames, old));
+        }
         img
+    }
+
+    /// Every picture let go of (GPUI keeps each one it's shown in its atlas until told): drawn again as they're needed.
+    fn retire_sprites(&mut self) {
+        let f = self.frames;
+        self.retired.extend(self.sprites.drain().map(|(_, img)| (f, img)));
+        if let Some((_, old)) = self.background.take() {
+            self.retired.push((f, old));
+        }
     }
 
     /// A part at a value (for the keyboard: a note's key pressed, or -1 for the whole keyboard).
@@ -234,7 +286,7 @@ impl Fourpole {
         let img = Self::image(pw, ph, self.panel.render_part(p.index, v, scale, pw, ph));
         // (a window resize changes the scale: drop the sprites of the old one)
         if self.sprites.len() > 6000 {
-            self.sprites.clear();
+            self.retire_sprites();
         }
         self.sprites.insert(key, img.clone());
         img
@@ -252,6 +304,9 @@ impl Fourpole {
     }
 
     fn mouse_down(&mut self, part: usize, ev: &MouseDownEvent, cx: &mut Context<Self>) {
+        self.panel.window_origin_from_pointer(f32::from(ev.position.x), f32::from(ev.position.y));
+        self.tip = None;
+        self.pointer_still = Instant::now();
         let p = self.layout.parts[part].clone();
         let (x, y) = self.to_panel(ev.position);
         match p.kind.as_str() {
@@ -430,13 +485,46 @@ impl Render for Fourpole {
         self.frame = (s, ox, oy);
         // the parts are drawn at the screen's own resolution
         let dev = (s * window.scale_factor() * 16.0).round() / 16.0;
+        // (a new size: the pictures at the old one go; and those let go of two frames ago are off screen: out of the atlas)
+        self.frames += 1;
+        let key = (dev * 64.0).round() as u32;
+        if self.background.as_ref().is_some_and(|(k, _)| *k != key) {
+            self.retire_sprites();
+        }
+        let now = self.frames;
+        let (old, keep): (Vec<_>, Vec<_>) = self.retired.drain(..).partition(|(f0, _)| now >= f0 + 2);
+        self.retired = keep;
+        for (_, img) in old {
+            if window.drop_image(img).is_ok() {
+                self.dropped += 1;
+            }
+        }
+        // the bridge keeps the panel where it is on screen (so its menus and pop-ups open over it)
+        let wb = window.bounds();
+        self.panel.window_origin(f32::from(wb.origin.x), f32::from(wb.origin.y) + (f32::from(wb.size.height) - vh).max(0.0));
+        self.panel.place(ox, oy, s);
         let place = move |x: f32, y: f32, w: f32, h: f32| div().absolute().left(px(ox + x * s)).top(px(oy + y * s)).w(px(w * s)).h(px(h * s));
 
         let mut root = div()
             .size_full()
             .bg(rgb(0x0b0b0b))
             .track_focus(&self.focus)
-            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, cx| this.mouse_move(ev, cx)))
+            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, cx| {
+                // (a tooltip waits for the mouse to rest)
+                let at = (f32::from(ev.position.x), f32::from(ev.position.y));
+                let (x, y) = this.to_panel(ev.position);
+                let p = if x >= 0.0 && y >= 0.0 && x < this.layout.width && y < this.layout.height { Some((x, y)) } else { None };
+                if this.drag.is_none() {
+                    this.panel.window_origin_from_pointer(at.0, at.1);
+                }
+                if p != this.pointer {
+                    this.pointer = p;
+                    this.pointer_at = at;
+                    this.pointer_still = Instant::now();
+                    this.tip = None;
+                }
+                this.mouse_move(ev, cx)
+            }))
             .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| this.mouse_up(cx)))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
                 if this.key(&ev.keystroke.key, ev.keystroke.key_char.as_deref(), true, &ev.keystroke.modifiers) {
@@ -527,6 +615,37 @@ impl Render for Fourpole {
                         cx.notify();
                     })),
             );
+        }
+        // a tooltip, once the mouse has rested on a part that says what it is
+        if let Some(pp) = self.pointer {
+            if self.drag.is_none() && self.pointer_still.elapsed() > Duration::from_millis(550) {
+                if self.tip.as_ref().map(|t| t.1) != Some(pp) {
+                    self.tip = Some((self.panel.tooltip(pp.0, pp.1), pp));
+                }
+                if let Some((text, _)) = &self.tip {
+                    if !text.is_empty() {
+                        let w = (text.len() as f32 * 6.6 + 22.0).min(340.0);
+                        let x = (self.pointer_at.0 + 14.0).min(vw - w - 8.0).max(8.0);
+                        let y = if self.pointer_at.1 + 60.0 > vh { self.pointer_at.1 - 40.0 } else { self.pointer_at.1 + 20.0 };
+                        root = root.child(
+                            div()
+                                .absolute()
+                                .left(px(x))
+                                .top(px(y))
+                                .max_w(px(340.0))
+                                .px(px(9.0))
+                                .py(px(6.0))
+                                .bg(rgba(0x17181cf2))
+                                .border_1()
+                                .border_color(rgba(0xffffff26))
+                                .rounded(px(5.0))
+                                .text_size(px(12.0))
+                                .text_color(rgb(0xece8dd))
+                                .child(text.clone()),
+                        );
+                    }
+                }
+            }
         }
         root
     }

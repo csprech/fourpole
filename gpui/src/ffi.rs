@@ -22,6 +22,12 @@ unsafe extern "C" {
     fn fp_key_event(p: *mut FpPanel, chars: *const c_char, down: c_int, command: c_int, shift: c_int) -> c_int;
     fn fp_state_json(p: *mut FpPanel) -> *const c_char;
     fn fp_command(p: *mut FpPanel, name: *const c_char);
+    fn fp_window_origin(p: *mut FpPanel, x: f32, y: f32);
+    fn fp_window_origin_from_pointer(p: *mut FpPanel, x: f32, y: f32);
+    fn fp_place(p: *mut FpPanel, x: f32, y: f32, scale: f32);
+    fn fp_tooltip(p: *mut FpPanel, x: f32, y: f32) -> *const c_char;
+    fn fp_menu_check(p: *mut FpPanel) -> c_int;
+    fn fp_close_menus(p: *mut FpPanel);
 }
 
 pub struct Panel(*mut FpPanel);
@@ -74,6 +80,24 @@ impl Panel {
     pub fn command(&self, name: &str) {
         let n = CString::new(name).unwrap();
         unsafe { fp_command(self.0, n.as_ptr()) }
+    }
+    pub fn window_origin(&self, x: f32, y: f32) {
+        unsafe { fp_window_origin(self.0, x, y) }
+    }
+    pub fn window_origin_from_pointer(&self, x: f32, y: f32) {
+        unsafe { fp_window_origin_from_pointer(self.0, x, y) }
+    }
+    pub fn place(&self, x: f32, y: f32, scale: f32) {
+        unsafe { fp_place(self.0, x, y, scale) }
+    }
+    pub fn tooltip(&self, x: f32, y: f32) -> String {
+        unsafe { CStr::from_ptr(fp_tooltip(self.0, x, y)) }.to_string_lossy().into_owned()
+    }
+    pub fn menu_check(&self) -> i32 {
+        unsafe { fp_menu_check(self.0) }
+    }
+    pub fn close_menus(&self) {
+        unsafe { fp_close_menus(self.0) }
     }
 }
 
