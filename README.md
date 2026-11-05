@@ -33,10 +33,12 @@ open build/Fourpole_artefacts/Release/Fourpole.app
 ## Playing it
 
 - **Keyboard:** click the keys (drag for a glissando).
-- **Computer keyboard:** `A W S E D F T G Y H U J K O L P ; '` play C up to F. `Z` / `X` move down / up an octave.
-- **MIDI controller:** plug it in at any time, before or after starting Fourpole. Notes, pitch bend, the mod wheel and a sustain pedal work, and keys you play over MIDI light up on the screen keyboard. Knobs and buttons can turn the panel's controls (see below).
+- **Computer keyboard:** `A W S E D F T G Y H U J K O L P ; '` play C up to F. `Z` / `X` move down / up an octave. It plays as soon as the window is in front, even after clicking a knob. Keys held when you switch away are let go. `Esc` is all notes off.
+- **MIDI controller:** plug it in at any time, before or after starting Fourpole. Notes, pitch bend, the mod wheel and a sustain pedal work, and keys you play over MIDI light up on the screen keyboard. **Program changes** pick patches (program 1 = the first, in `<` `>` order). Knobs and buttons can turn the panel's controls (see below). Unplugging a controller while it holds a note lets the note go and centres its bend.
 - **Wheels:** PITCH springs back to the centre; MOD stays where you leave it.
-- **Patches:** `<` `>` (or the arrow keys) step through the factory patches, then your own. **Save** / **Save as** write `.fourpole` files (plain JSON) to `~/Music/Fourpole Patches`. **Load** opens one from anywhere.
+- **Patches:** `<` `>` (or the arrow keys) step through the factory patches, then your own in name order, carrying on from the one you last saved or loaded. **Save** / **Save as** write `.fourpole` files (plain JSON) to `~/Music/Fourpole Patches`; a patch is named after its file. **Load** opens one from anywhere, or drop a `.fourpole` file on the window. A `*` after the name means you've changed it since loading or saving.
+- **Undo:** `Cmd-Z` / `Cmd-Shift-Z` undo and redo knob turns (a whole turn is one step), switches, Setup changes and patch changes, so browsing away from a tweaked sound doesn't lose it. Also in the Setup menu.
+- **Remembered:** like the hardware's knobs, the panel is as you left it when you start Fourpole again, edits and all. So are the window's size and place, the audio device, the external-input setting and the MIDI assignments.
 - **Setup:** conveniences the original didn't have:
   - pitch-wheel range;
   - note priority: low (the original), high or last;
@@ -45,6 +47,7 @@ open build/Fourpole_artefacts/Release/Fourpole.app
 - **Readouts:** hover over a knob (or turn it) to see its value in real units: cutoff in Hz, contour times in ms or s, frequency in semitones, the range in feet, the waveform's name.
 - **REC** records what you play to a WAV file in `~/Music/Fourpole Recordings`. The REC lamp lights and the name plate shows the time.
 - **POWER** (bottom of the OUTPUT section) switches the instrument off and on, with its pilot lamp.
+- **Audio/MIDI:** the output device, sample rate and buffer size, the input the external input jack uses, and MIDI inputs.
 - **Help** (or `?`): a quick guide.
 
 ### MIDI controller knobs
@@ -130,7 +133,8 @@ tests/        JUCE UnitTest suites for all of core/
 - Patches reach it under a short SpinLock, once per block when they change.
 - Notes and controllers from the screen and from MIDI are merged and placed sample-accurately within each block.
 
-**What the tests check (4,019 checks):**
+**What the tests check (4,050 checks):**
+- **Functions:** undo and redo (a knob turn is one step, separate controls are separate steps, redo is dropped by a new edit, the history is capped), and the patch list < > and program changes step through: factory then files in Finder's name order, wrapping, named after their files, skipping non-patches.
 - **Every panel control, one by one** (tests/ControlTests.cpp): each knob, selector and switch is played at different settings and its effect measured. That covers pitch for TUNE, RANGE and FREQUENCY, all six waveshapes on each oscillator (duty cycles, the reverse saw), and levels for the mixer and output. It covers brightness for CUTOFF and pink noise, the resonant peak and self-oscillation for EMPHASIS, and cutoff sweeps for contour amount, keyboard control and filter modulation. It covers every contour knob against its time or level, and the wheels and Setup options. The suite fails if a control in the panel table has no test.
 - Every waveform hits its frequency; pulse waves have no DC.
 - The ladder rolls off at 24 dB/octave (−73 dB three octaves above cutoff) and self-oscillates within 8% of the cutoff at full emphasis.
@@ -141,7 +145,7 @@ tests/        JUCE UnitTest suites for all of core/
 - The sustain pedal, external audio through the filter, the POWER switch, and the MIDI CC map (learn, defaults, save / load).
 - Every factory patch round-trips through JSON and plays.
 
-**Self-test of the real widgets:** `FOURPOLE_SELFTEST=/tmp/report.txt ./build/Fourpole_artefacts/Release/Fourpole.app/Contents/MacOS/Fourpole` launches the app, works every widget and writes a report, then quits. Each widget is turned through its own callbacks, and the test checks that the engine's patch changed that control's field and nothing else. It also checks MIDI learn for all 41 controls and loads every factory patch with < and >, checking each widget shows it. Then it checks by meter that VOLUME, MAIN OUTPUT, POWER and A-440 reach the audio, and that REC writes a file, which it deletes afterwards. Nothing is saved to your settings.
+**Self-test of the real widgets:** `FOURPOLE_SELFTEST=/tmp/report.txt ./build/Fourpole_artefacts/Release/Fourpole.app/Contents/MacOS/Fourpole` launches the app, works every widget and writes a report, then quits. Each widget is turned through its own callbacks, and the test checks that the engine's patch changed that control's field and nothing else. It also checks MIDI learn for all 41 controls and loads every factory patch with < and >, checking each widget shows it. It checks undo and redo, the `*` mark, and MIDI program changes. With `FOURPOLE_PATCH_DIR=/tmp/somewhere` it also saves into that folder and checks that < > step on from the saved file, and that dropping a file loads it. Then it checks by meter that VOLUME, MAIN OUTPUT, POWER and A-440 reach the audio, and that REC writes a file, which it deletes afterwards. Nothing is saved to your settings.
 
 **Testing aid:** `FOURPOLE_CAPTURE_WAV=/path/out.wav open Fourpole.app` records the first 20 s of the app's output to a WAV when it quits. That's how the running app was checked: notes from the screen keyboard and from a MIDI controller plugged in after launch both came out at the right pitch.
 

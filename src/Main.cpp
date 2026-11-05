@@ -19,6 +19,9 @@ public:
 
     void shutdown() override
     {
+        if (window != nullptr)
+            if (auto* mc = dynamic_cast<MainComponent*> (window->getContentComponent()))
+                mc->prepareToQuit();
         window.reset();
         engine.reset();
     }
@@ -41,6 +44,15 @@ public:
                 c->grabKeyboardFocus();
         }
         void closeButtonPressed() override { JUCEApplication::getInstance()->systemRequestedQuit(); }
+        /** Coming back to the window (Dock, Cmd-Tab, or launched behind another app): the computer
+            keyboard plays the synth straight away, without a click first. */
+        void activeWindowStatusChanged() override
+        {
+            DocumentWindow::activeWindowStatusChanged();
+            if (isActiveWindow())
+                if (auto* c = getContentComponent(); c != nullptr && c->isShowing() && ! c->hasKeyboardFocus (true))
+                    c->grabKeyboardFocus();
+        }
     };
 
 private:

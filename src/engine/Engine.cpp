@@ -126,6 +126,16 @@ bool Engine::nextControllerMessage (int& cc, int& value)
     return true;
 }
 
+void Engine::pushController (int cc, int value)
+{
+    const juce::ScopedLock sl (ccWriteLock);
+    const auto w = ccFifo.write (1);
+    if (w.blockSize1 > 0)
+        ccItems[(size_t) w.startIndex1] = { cc, value };
+    else if (w.blockSize2 > 0)
+        ccItems[(size_t) w.startIndex2] = { cc, value };
+}
+
 void Engine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& m)
 {
     if (m.isNoteOn())
@@ -136,17 +146,13 @@ void Engine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessag
         midiBend = (m.getPitchWheelValue() - 8192) / 8192.0f;
     else if (m.isControllerOfType (1))
         midiMod = m.getControllerValue() / 127.0f;
+    else if (m.isAllNotesOff() || m.isAllSoundOff())
+        for (auto& k : midiKeys)
+            k = false; // and the on-screen keys come up too
+    else if (m.isProgramChange())
+        return pushController (kProgramChange, m.getProgramChangeNumber()); // the panel picks the patch
     else if (m.isController() && ! MidiMap::isReserved (m.getControllerNumber()))
-    {
-        // a panel CC: goes to the message thread, where the MIDI map turns it into a knob move
-        const juce::ScopedLock sl (ccWriteLock);
-        const auto w = ccFifo.write (1);
-        if (w.blockSize1 > 0)
-            ccItems[(size_t) w.startIndex1] = { m.getControllerNumber(), m.getControllerValue() };
-        else if (w.blockSize2 > 0)
-            ccItems[(size_t) w.startIndex2] = { m.getControllerNumber(), m.getControllerValue() };
-        return;
-    }
+        return pushController (m.getControllerNumber(), m.getControllerValue()); // a panel CC: becomes a knob move
     collector.addMessageToQueue (m);
 }
 
@@ -266,9 +272,22 @@ void Engine::midiDevicesChanged()
             deviceManager.setMidiInputDeviceEnabled (d.identifier, true);
             messages.add ("MIDI IN: " + d.name + " connected");
         }
+    bool lost = false;
     for (auto& d : knownMidiInputs)
         if (! contains (now, d))
+        {
             messages.add ("MIDI IN: " + d.name + " disconnected");
+            lost = true;
+        }
+    if (lost)
+    {
+        // a controller unplugged mid-note can't send its note-offs (or centre its bend): let go of them
+        for (auto& k : midiKeys)
+            k = false;
+        midiBend = 0.0f;
+        post (juce::MidiMessage::pitchWheel (1, 8192));
+        allNotesOff();
+    }
     knownMidiInputs = now;
     if (onMidiDeviceMessage)
         for (auto& m : messages)

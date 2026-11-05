@@ -52,8 +52,10 @@ public:
     double getRecordedSeconds() const { return recordedSamples.load() / juce::jmax (1.0, sampleRate.load()); }
 
     /** MIDI controller CCs for the panel (everything but mod wheel / sustain / all-notes-off),
-        picked up on the message thread. Returns false when there are none left. */
+        picked up on the message thread. Program changes come through here too, as
+        cc == kProgramChange with the program number as the value. False when there are none left. */
     bool nextControllerMessage (int& cc, int& value);
+    static constexpr int kProgramChange = 1000;
 
     // feedback for the UI
     bool isOverloaded() const { return overloaded.load(); }
@@ -75,6 +77,7 @@ private:
     void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
     void midiDevicesChanged();
     void post (const juce::MidiMessage& m);
+    void pushController (int cc, int value); // MIDI threads -> the message thread's fifo
 
     juce::AudioDeviceManager deviceManager;
     juce::MidiMessageCollector collector;

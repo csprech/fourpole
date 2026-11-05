@@ -1,6 +1,8 @@
 #pragma once
 
+#include "core/History.h"
 #include "core/PanelControls.h"
+#include "core/PatchLibrary.h"
 #include "engine/Engine.h"
 #include "ui/Controls.h"
 #include "ui/Keyboard.h"
@@ -10,7 +12,7 @@ namespace fourpole
 {
 /** The whole instrument: walnut case, the tilted-up panel (controllers, oscillator bank, mixer,
     modifiers, output), the patch bar on the top rail, the wheels and the 44-key keyboard. */
-class MainComponent : public juce::Component, private juce::Timer
+class MainComponent : public juce::Component, public juce::FileDragAndDropTarget, private juce::Timer
 {
 public:
     explicit MainComponent (Engine& engine);
@@ -21,7 +23,17 @@ public:
     bool keyPressed (const juce::KeyPress&) override;
     bool keyStateChanged (bool isKeyDown) override;
     void parentHierarchyChanged() override;
-    void mouseDown (const juce::MouseEvent&) override { grabKeyboardFocus(); }
+    /** Any click in the window (it listens to its children too) gives the computer keyboard back to the panel. */
+    void mouseDown (const juce::MouseEvent&) override
+    {
+        if (! hasKeyboardFocus (false))
+            grabKeyboardFocus();
+    }
+    void focusLost (FocusChangeType) override { releaseComputerKeys(); }
+    /** Before the window closes: stops a recording, saves the panel and where the window is. */
+    void prepareToQuit();
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void filesDropped (const juce::StringArray& files, int x, int y) override;
 
 private:
     void timerCallback() override;
@@ -30,8 +42,18 @@ private:
     void patchEdited();
     void flash (const juce::String& m);
     void stepPatch (int dir);
+    void selectPatch (int index);
     void savePatch (bool askName);
     void loadPatchFile();
+    void openPatchFile (const juce::File& f);
+    void releaseComputerKeys();
+    void panic();
+    // ---- undo: snapshots of the panel, taken just before each change
+    PanelState currentState() const;
+    void restoreState (const PanelState& s);
+    void remember (const juce::String& what);
+    void undo();
+    void redo();
     void showSetupMenu();
     void showHelp();
     void showAudioSettings();
@@ -42,8 +64,9 @@ private:
     void bind (const juce::String& id, Rocker& r);
     void showControlMenu (const juce::String& id);
     void applyController (int cc, int value);
-    void saveSettings();
+    void saveSettings (bool includeWindow = true);
     void loadSettings();
+    void markSettingsDirty();
     juce::String controlName (const juce::String& id) const;
     void updateTooltips();
     /** FOURPOLE_SELFTEST=/path/report.txt: works every widget, checks the engine's patch follows, then quits. */
@@ -107,6 +130,9 @@ private:
     uint32_t messageUntil = 0;
     int patchIndex = 0;
     juce::File currentFile;
+    bool edited = false; // changed since it was loaded or saved (the name plate shows *)
+    PatchLibrary library { patchFolder() };
+    History history;
 
     std::unique_ptr<juce::FileChooser> chooser;
     int octaveBase = 48; // computer keyboard: A = C3
@@ -127,5 +153,7 @@ private:
     juce::String learnTarget;
     std::unique_ptr<juce::PropertiesFile> settings;
     float lastMidiMod = 0.0f; // the on-screen MOD. wheel follows a MIDI controller's
+    bool settingsDirty = false, windowRestored = false;
+    uint32_t settingsDirtySince = 0;
 };
 } // namespace fourpole

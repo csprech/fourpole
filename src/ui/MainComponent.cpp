@@ -190,6 +190,8 @@ MainComponent::MainComponent (Engine& e) : engine (e)
         }
     };
     noFocus (*this);
+    // ...and a click anywhere (a knob, a key, a switch) gives the keys back to the keyboard
+    addMouseListener (this, true);
 
     loadPatchIntoControls();
     auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay();
@@ -218,7 +220,7 @@ MainComponent::~MainComponent()
 {
     if (engine.isRecording())
         engine.stopRecording();
-    saveSettings();
+    saveSettings (false); // (the window is already going: its place was saved by prepareToQuit)
     stopTimer();
     engine.onMidiDeviceMessage = nullptr;
     juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
@@ -229,7 +231,17 @@ void MainComponent::parentHierarchyChanged()
 {
     juce::Component::SafePointer<MainComponent> safe (this);
     juce::MessageManager::callAsync ([safe] {
-        if (safe != nullptr && safe->isShowing())
+        if (safe == nullptr)
+            return;
+        if (! safe->windowRestored && safe->isShowing())
+        {
+            // the window's size and place from last time (unless a test asked for a size)
+            safe->windowRestored = true;
+            if (auto* w = dynamic_cast<juce::ResizableWindow*> (safe->getTopLevelComponent()))
+                if (safe->settings != nullptr && safe->settings->containsKey ("window") && std::getenv ("FOURPOLE_WINDOW_SIZE") == nullptr)
+                    w->restoreWindowStateFromString (safe->settings->getValue ("window"));
+        }
+        if (safe->isShowing())
             safe->grabKeyboardFocus();
     });
 }
@@ -250,8 +262,17 @@ void MainComponent::loadPatchIntoControls()
     repaint (namePlate);
 }
 
+void MainComponent::markSettingsDirty()
+{
+    if (! settingsDirty)
+        settingsDirtySince = juce::Time::getMillisecondCounter();
+    settingsDirty = true;
+}
+
 void MainComponent::patchEdited()
 {
+    markSettingsDirty();
+    edited = true;
     engine.setPatch (patch);
     repaint (namePlate);
 }
@@ -265,30 +286,36 @@ void MainComponent::flash (const juce::String& m)
 
 juce::File MainComponent::patchFolder() const
 {
+    if (auto* dir = std::getenv ("FOURPOLE_PATCH_DIR")) // testing: keep test patches out of ~/Music
+        return juce::File (dir);
     return juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("Fourpole Patches");
 }
 
 void MainComponent::stepPatch (int dir)
 {
-    // factory patches, then the ones saved in ~/Music/Fourpole Patches
-    juce::Array<juce::File> user;
-    if (patchFolder().isDirectory())
-        user = patchFolder().findChildFiles (juce::File::findFiles, false, "*.fourpole");
-    user.sort();
-    const int total = (int) factoryPatches().size() + user.size();
-    patchIndex = ((patchIndex + dir) % total + total) % total;
-    if (patchIndex < (int) factoryPatches().size())
-    {
-        patch = factoryPatches()[(size_t) patchIndex];
-        currentFile = juce::File();
-    }
-    else
-    {
-        currentFile = user[patchIndex - (int) factoryPatches().size()];
-        patch = Patch::fromJson (juce::JSON::parse (currentFile));
-    }
+    // factory patches, then the ones saved in the patch folder (re-read: files may have come or gone)
+    library.rescan();
+    if (currentFile != juce::File())
+        if (const int i = library.indexOf (currentFile); i >= 0)
+            patchIndex = i; // step from the file on the panel, wherever it now sits in the list
+    selectPatch (library.step (patchIndex, dir));
+}
+
+void MainComponent::selectPatch (int index)
+{
+    if (index < 0 || index >= library.size())
+        return flash ("No patch " + juce::String (index + 1) + " (there are " + juce::String (library.size()) + ")");
+    Patch p;
+    if (! library.load (index, p))
+        return flash ("Couldn't read " + library.fileAt (index).getFileName());
+    remember ("patch change");
+    patch = p;
+    patchIndex = index;
+    currentFile = library.fileAt (index);
+    edited = false;
     loadPatchIntoControls();
     engine.setPatch (patch);
+    markSettingsDirty();
 }
 
 void MainComponent::savePatch (bool askName)
@@ -298,6 +325,12 @@ void MainComponent::savePatch (bool askName)
         if (f.replaceWithText (juce::JSON::toString (patch.toJson())))
         {
             currentFile = f;
+            edited = false;
+            library.rescan();
+            if (const int i = library.indexOf (f); i >= 0)
+                patchIndex = i; // < > now step on from here
+            engine.setPatch (patch);
+            markSettingsDirty();
             flash ("Saved " + f.getFileName());
         }
         else
@@ -322,18 +355,89 @@ void MainComponent::loadPatchFile()
     chooser = std::make_unique<juce::FileChooser> ("Load patch", patchFolder(), "*.fourpole");
     chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                           [this] (const juce::FileChooser& fc) {
-                              auto f = fc.getResult();
-                              if (! f.existsAsFile())
-                                  return;
-                              const auto json = juce::JSON::parse (f);
-                              if (json.getProperty ("format", {}).toString() != "fourpole-patch")
-                                  return flash ("Not a Fourpole patch");
-                              patch = Patch::fromJson (json);
-                              currentFile = f;
-                              loadPatchIntoControls();
-                              engine.setPatch (patch);
-                              flash ("Loaded " + f.getFileName());
+                              if (auto f = fc.getResult(); f.existsAsFile())
+                                  openPatchFile (f);
                           });
+}
+
+void MainComponent::openPatchFile (const juce::File& f)
+{
+    Patch p;
+    if (! PatchLibrary::loadFile (f, p))
+        return flash (f.getFileName() + " isn't a Fourpole patch");
+    remember ("load " + f.getFileName());
+    patch = p;
+    currentFile = f;
+    edited = false;
+    library.rescan();
+    if (const int i = library.indexOf (f); i >= 0)
+        patchIndex = i;
+    loadPatchIntoControls();
+    engine.setPatch (patch);
+    markSettingsDirty();
+    flash ("Loaded " + f.getFileName());
+}
+
+bool MainComponent::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    for (auto& f : files)
+        if (juce::File (f).hasFileExtension ("fourpole"))
+            return true;
+    return false;
+}
+
+void MainComponent::filesDropped (const juce::StringArray& files, int, int)
+{
+    for (auto& f : files)
+        if (juce::File (f).hasFileExtension ("fourpole"))
+            return openPatchFile (juce::File (f)); // the first patch dropped
+}
+
+// ---------------------------------------------------------------- undo
+
+PanelState MainComponent::currentState() const
+{
+    return { patch, currentFile.getFullPathName(), patchIndex, edited };
+}
+
+void MainComponent::restoreState (const PanelState& st)
+{
+    patch = st.patch;
+    currentFile = st.file.isNotEmpty() ? juce::File (st.file) : juce::File();
+    patchIndex = st.patchIndex;
+    edited = st.edited;
+    loadPatchIntoControls();
+    engine.setPatch (patch);
+    markSettingsDirty();
+}
+
+void MainComponent::remember (const juce::String& what)
+{
+    history.remember (currentState(), what, juce::Time::getMillisecondCounter());
+}
+
+void MainComponent::undo()
+{
+    juce::String what;
+    if (auto st = history.undo (currentState(), what))
+    {
+        restoreState (*st);
+        flash ("Undo " + controlName (what));
+    }
+    else
+        flash ("Nothing to undo");
+}
+
+void MainComponent::redo()
+{
+    juce::String what;
+    if (auto st = history.redo (currentState(), what))
+    {
+        restoreState (*st);
+        flash ("Redo " + controlName (what));
+    }
+    else
+        flash ("Nothing to redo");
 }
 
 void MainComponent::showSetupMenu()
@@ -342,14 +446,14 @@ void MainComponent::showSetupMenu()
     juce::PopupMenu m, bend, prio, vel, drift;
     for (int st : { 1, 2, 3, 5, 7, 12 })
         bend.addItem ("+/- " + juce::String (st) + " semitones", true, juce::approximatelyEqual (patch.bendRange, (float) st),
-                      [this, st] { patch.bendRange = (float) st; patchEdited(); });
+                      [this, st] { remember ("bendRange"); patch.bendRange = (float) st; patchEdited(); });
     const char* prios[] = { "Low note (original)", "High note", "Last note" };
     for (int i = 0; i < 3; ++i)
-        prio.addItem (prios[i], true, (int) patch.priority == i, [this, i] { patch.priority = (NotePriority) i; patchEdited(); });
+        prio.addItem (prios[i], true, (int) patch.priority == i, [this, i] { remember ("priority"); patch.priority = (NotePriority) i; patchEdited(); });
     for (auto [label, amt] : { std::pair { "Off (original)", 0.0f }, std::pair { "Light", 0.35f }, std::pair { "Full", 1.0f } })
-        vel.addItem (label, true, juce::approximatelyEqual (patch.velocity, amt), [this, a = amt] { patch.velocity = a; patchEdited(); });
+        vel.addItem (label, true, juce::approximatelyEqual (patch.velocity, amt), [this, a = amt] { remember ("velocity"); patch.velocity = a; patchEdited(); });
     for (auto [label, amt] : { std::pair { "Off (perfectly stable)", 0.0f }, std::pair { "Subtle", 0.5f }, std::pair { "Vintage", 1.0f } })
-        drift.addItem (label, true, juce::approximatelyEqual (patch.drift, amt), [this, a = amt] { patch.drift = a; patchEdited(); });
+        drift.addItem (label, true, juce::approximatelyEqual (patch.drift, amt), [this, a = amt] { remember ("drift"); patch.drift = a; patchEdited(); });
     m.addSubMenu ("Pitch wheel range", bend);
     m.addSubMenu ("Note priority", prio);
     m.addSubMenu ("Velocity to loudness", vel);
@@ -374,8 +478,10 @@ void MainComponent::showSetupMenu()
         dir.revealToUser();
     });
     m.addSeparator();
-    m.addItem ("Init patch", [this] { patch = factoryPatches()[0]; patchIndex = 0; currentFile = juce::File(); loadPatchIntoControls(); engine.setPatch (patch); });
-    m.addItem ("All notes off", [this] { engine.allNotesOff(); });
+    m.addItem ("Init patch", [this] { selectPatch (0); });
+    m.addItem ("Undo  (Cmd-Z)", history.canUndo(), false, [this] { undo(); });
+    m.addItem ("Redo  (Cmd-Shift-Z)", history.canRedo(), false, [this] { redo(); });
+    m.addItem ("All notes off  (Esc)", [this] { panic(); });
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&setupBtn));
 }
 
@@ -394,8 +500,12 @@ void MainComponent::showHelp()
         "the MOD. wheel sends that to the oscillators (OSC. MODULATION) and/or the filter (FILTER MODULATION).\n\n"
         "TRICKS: EMPHASIS at 10 + both KEYBOARD CONTROL switches = the filter plays as a sine oscillator. "
         "EXTERNAL INPUT on and up = output feedback overdrive.\n\n"
-        "PATCHES: < > step through factory and saved patches. Save goes to Music/Fourpole Patches. "
-        "SETUP: pitch wheel range, note priority, velocity, drift, the external input jack, MIDI assignments.\n\n"
+        "PATCHES: < > step through factory and saved patches (or send a MIDI program change: 1 = the first). Save goes to "
+        "Music/Fourpole Patches; drop a .fourpole file on the window to load it. A * after the name means it's been changed. "
+        "Cmd-Z / Cmd-Shift-Z undo and redo knob moves, switches and patch changes. The panel is remembered when you quit, "
+        "like the hardware's knobs.\n\n"
+        "SETUP: pitch wheel range, note priority, velocity, drift, the external input jack, MIDI assignments. "
+        "Esc = all notes off.\n\n"
         "MIDI CONTROLLERS: knobs on CC 70-77 (e.g. an MPK Mini's K1-K8) control contour amount, emphasis, loudness decay "
         "and attack, cutoff, filter decay, glide and oscillator 2 frequency. RIGHT-CLICK any knob or switch and choose MIDI learn "
         "to assign it to whatever you move next. A sustain pedal holds notes.\n\n"
@@ -405,8 +515,9 @@ void MainComponent::showHelp()
 
 void MainComponent::showAudioSettings()
 {
-    auto* selector = new juce::AudioDeviceSelectorComponent (engine.getDeviceManager(), 0, 0, 1, 2, true, false, true, false);
-    selector->setSize (520, 420);
+    // inputs 0..1: pick the interface input EXTERNAL INPUT hears (Setup > External input jack)
+    auto* selector = new juce::AudioDeviceSelectorComponent (engine.getDeviceManager(), 0, 1, 1, 2, true, false, true, false);
+    selector->setSize (560, 540);
     juce::DialogWindow::LaunchOptions o;
     o.content.setOwned (selector);
     o.dialogTitle = "Audio / MIDI settings";
@@ -446,6 +557,7 @@ void MainComponent::bind (const juce::String& id, PanelKnob& k)
     k.onChange = [this, def] (double v) {
         if (loading)
             return;
+        remember (def->id);
         def->set (patch, (float) v);
         patchEdited();
     };
@@ -463,6 +575,7 @@ void MainComponent::bind (const juce::String& id, Rocker& r)
     r.onToggle = [this, def] (bool on) {
         if (loading)
             return;
+        remember (def->id);
         def->set (patch, on ? 1.0f : 0.0f);
         patchEdited();
     };
@@ -518,6 +631,12 @@ void MainComponent::showControlMenu (const juce::String& id)
 
 void MainComponent::applyController (int cc, int value)
 {
+    if (cc == Engine::kProgramChange)
+    {
+        library.rescan();
+        selectPatch (value); // program 1 = the first patch, as < > count them
+        return;
+    }
     if (learnTarget.isNotEmpty())
     {
         midiMap.assign (cc, learnTarget);
@@ -560,17 +679,51 @@ void MainComponent::loadSettings()
     settings = std::make_unique<juce::PropertiesFile> (o);
     if (settings->containsKey ("midiMap"))
         midiMap.fromJson (juce::JSON::parse (settings->getValue ("midiMap")));
+    // the audio interface chosen in AUDIO/MIDI (falls back to the default if it isn't there now)
+    if (auto xml = settings->getXmlValue ("audioDevice"))
+        engine.getDeviceManager().initialise (0, 2, xml.get(), true);
     if (settings->getBoolValue ("externalAudioInput", false))
         engine.setExternalAudioInput (true);
+    // the panel as you left it, like the hardware's knobs (edits and all)
+    if (settings->containsKey ("panel"))
+    {
+        const auto json = juce::JSON::parse (settings->getValue ("panel"));
+        if (json.getProperty ("format", {}).toString() == "fourpole-patch")
+        {
+            patch = Patch::fromJson (json);
+            const juce::File f (settings->getValue ("panelFile"));
+            currentFile = settings->getValue ("panelFile").isNotEmpty() && f.existsAsFile() ? f : juce::File();
+            patchIndex = juce::jlimit (0, library.size() - 1, settings->getIntValue ("panelIndex", 0));
+            edited = settings->getBoolValue ("panelEdited", false);
+            engine.setPatch (patch);
+        }
+    }
 }
 
-void MainComponent::saveSettings()
+void MainComponent::prepareToQuit()
+{
+    if (engine.isRecording())
+        engine.stopRecording();
+    saveSettings (true); // while the window is still there to ask where it is
+}
+
+void MainComponent::saveSettings (bool includeWindow)
 {
     if (settings == nullptr)
         return;
     settings->setValue ("midiMap", juce::JSON::toString (midiMap.toJson(), true));
     settings->setValue ("externalAudioInput", engine.isUsingExternalAudioInput());
+    if (auto xml = engine.getDeviceManager().createStateXml())
+        settings->setValue ("audioDevice", xml.get());
+    settings->setValue ("panel", juce::JSON::toString (patch.toJson(), true));
+    settings->setValue ("panelFile", currentFile.getFullPathName());
+    settings->setValue ("panelIndex", patchIndex);
+    settings->setValue ("panelEdited", edited);
+    if (includeWindow)
+        if (auto* w = dynamic_cast<juce::ResizableWindow*> (getTopLevelComponent()); w != nullptr && w->isOnDesktop())
+            settings->setValue ("window", w->getWindowStateAsString());
     settings->saveIfNeeded();
+    settingsDirty = false;
 }
 
 // ---------------------------------------------------------------- timer / keys
@@ -578,6 +731,10 @@ void MainComponent::saveSettings()
 void MainComponent::timerCallback()
 {
     overload.setOn (engine.isOverloaded());
+    // keep the remembered panel up to date (a second after the last change), so a crash or a forced
+    // quit doesn't lose it
+    if (settingsDirty && juce::Time::getMillisecondCounter() - settingsDirtySince > 1000)
+        saveSettings();
     for (int cc = 0, value = 0, n = 0; n < 64 && engine.nextControllerMessage (cc, value); ++n)
         applyController (cc, value);
     if (engine.isRecording())
@@ -617,6 +774,14 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
     {
         if (c == 's') { savePatch (k.getModifiers().isShiftDown()); return true; }
         if (c == 'o') { loadPatchFile(); return true; }
+        if (c == 'z' || k.getKeyCode() == 'Z')
+        {
+            if (k.getModifiers().isShiftDown())
+                redo();
+            else
+                undo();
+            return true;
+        }
         return false;
     }
     if (c == 'z') { octaveBase = juce::jmax (24, octaveBase - 12); flash ("Computer keyboard: C" + juce::String (octaveBase / 12 - 1)); return true; }
@@ -624,11 +789,40 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
     if (k == juce::KeyPress::leftKey) { stepPatch (-1); return true; }
     if (k == juce::KeyPress::rightKey) { stepPatch (1); return true; }
     if (k.getTextCharacter() == '?') { showHelp(); return true; }
-    if (k == juce::KeyPress::escapeKey && learnTarget.isNotEmpty()) { learnTarget.clear(); flash ("MIDI learn cancelled"); return true; }
+    if (k == juce::KeyPress::escapeKey)
+    {
+        if (learnTarget.isNotEmpty())
+        {
+            learnTarget.clear();
+            flash ("MIDI learn cancelled");
+        }
+        else
+            panic();
+        return true;
+    }
     for (auto key : kKeys)
         if (c == (juce::juce_wchar) key)
             return true; // handled in keyStateChanged
     return false;
+}
+
+void MainComponent::releaseComputerKeys()
+{
+    // the window lost focus with keys held: their key-ups will never arrive here
+    for (int i = 0; i < 18; ++i)
+        if (keyHeld[(size_t) i])
+        {
+            keyHeld[(size_t) i] = false;
+            engine.noteOff (keyNote[(size_t) i]);
+            keyboard.setKeyDown (keyNote[(size_t) i], false);
+        }
+}
+
+void MainComponent::panic()
+{
+    releaseComputerKeys();
+    engine.allNotesOff();
+    flash ("All notes off");
 }
 
 bool MainComponent::keyStateChanged (bool)
@@ -757,6 +951,97 @@ void MainComponent::runSelfTest (const juce::File& reportFile)
         loadPatchIntoControls();
         engine.setPatch (patch);
         log ("ok    " + juce::String ((int) factoryPatches().size()) + " patches");
+    }
+
+    log ("-- undo / redo, the edited mark");
+    {
+        const auto saved = currentState();
+        history.clear();
+        auto& cut = controls["cutoff"];
+        edited = false;
+        const float was = cut.def->get (patch);
+        // one knob turn (several moves in a row) is one undo step
+        for (float v : { -2.0f, -1.0f, 0.5f })
+            move (cut, v);
+        if (! edited)
+            fail ("turning a knob didn't mark the patch edited (*)");
+        undo();
+        if (! near (cut.def->get (engine.getPatch()), was) || ! near (shown (cut), was) || edited)
+            fail ("undo didn't put the cutoff back where it was (or left it marked edited)");
+        redo();
+        if (! near (cut.def->get (engine.getPatch()), 0.5f) || ! near (shown (cut), 0.5f))
+            fail ("redo didn't bring the cutoff turn back");
+        undo();
+        // undo reaches a patch change too: browsing away doesn't lose your tweaks
+        move (cut, 2.0f);
+        stepPatch (1);
+        undo();
+        if (! near (cut.def->get (engine.getPatch()), 2.0f))
+            fail ("undo after > didn't bring the tweaked patch back");
+        restoreState (saved);
+        history.clear();
+        log ("ok    knob turns, redo, and undoing a patch change");
+    }
+
+    log ("-- MIDI program change and Init");
+    {
+        const auto saved = currentState();
+        applyController (Engine::kProgramChange, 2);
+        if (engine.getPatch().name != factoryPatches()[2].name)
+            fail ("program change 3 didn't select " + factoryPatches()[2].name + " (got " + engine.getPatch().name + ")");
+        applyController (Engine::kProgramChange, 127);
+        if (engine.getPatch().name != factoryPatches()[2].name)
+            fail ("a program change past the last patch changed the patch");
+        restoreState (saved);
+        history.clear();
+        log ("ok    program change selects patches; one past the end is ignored");
+    }
+
+    if (auto* dirPath = std::getenv ("FOURPOLE_PATCH_DIR"))
+    {
+        log ("-- saving and loading (in " + juce::String (dirPath) + ")");
+        const auto saved = currentState();
+        const juce::File dir (dirPath);
+        dir.createDirectory();
+        auto writePatch = [] (const juce::File& f, float cutoffValue) {
+            Patch p;
+            p.cutoff = cutoffValue;
+            f.replaceWithText (juce::JSON::toString (p.toJson()));
+        };
+        writePatch (dir.getChildFile ("A first.fourpole"), 1.0f);
+        writePatch (dir.getChildFile ("C third.fourpole"), 3.0f);
+        // SAVE over a file in the folder: < > then step on from that file
+        const auto b = dir.getChildFile ("B second.fourpole");
+        writePatch (b, 0.0f);
+        selectPatch (1); // a factory patch...
+        move (controls["cutoff"], 2.0f);
+        currentFile = b; // ...saved as "B second"
+        savePatch (false);
+        Patch back;
+        if (! PatchLibrary::loadFile (b, back) || ! near (back.cutoff, 2.0f) || back.name != "B second")
+            fail ("SAVE didn't write the panel into B second.fourpole");
+        if (edited)
+            fail ("still marked edited after saving");
+        stepPatch (1);
+        if (engine.getPatch().name != "C third")
+            fail ("> after saving B didn't step to C (got " + engine.getPatch().name + ")");
+        stepPatch (-1);
+        stepPatch (-1);
+        if (engine.getPatch().name != "A first")
+            fail ("< < didn't step back to A (got " + engine.getPatch().name + ")");
+        // dropping a patch file on the window loads it
+        const auto dropped = juce::File::createTempFile ("dropped.fourpole");
+        writePatch (dropped, -4.0f);
+        if (! isInterestedInFileDrag ({ dropped.getFullPathName() }) || isInterestedInFileDrag ({ "/tmp/song.wav" }))
+            fail ("the window should take .fourpole files (and only those)");
+        filesDropped ({ dropped.getFullPathName() }, 10, 10);
+        if (! near (engine.getPatch().cutoff, -4.0f) || ! near (shown (controls["cutoff"]), -4.0f))
+            fail ("dropping a patch file didn't load it");
+        dropped.deleteFile();
+        restoreState (saved);
+        history.clear();
+        library.rescan();
+        log ("ok    SAVE, then < > from the saved file; dropping a file loads it");
     }
 
     log ("-- POWER and REC");
@@ -1007,7 +1292,8 @@ void MainComponent::paint (juce::Graphics& g)
     g.setColour (juce::Colours::black);
     g.drawRoundedRectangle (plate, 3.0f, 1.0f);
     const bool showMsg = message.isNotEmpty();
-    theme::drawPrint (g, showMsg ? message : patch.name + (currentFile.existsAsFile() ? juce::String() : juce::String ("  (factory)")),
+    const auto title = patch.name + (edited ? " *" : "") + (currentFile.existsAsFile() ? juce::String() : juce::String ("  (factory)"));
+    theme::drawPrint (g, showMsg ? message : title,
                       plate.reduced (10.0f, 2.0f), juce::Justification::centredLeft, 13.0f, showMsg);
 }
 
