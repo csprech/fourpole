@@ -3,7 +3,7 @@
 // Panel controls: knobs on printed scales, rotary selectors, rocker switches, the overload lamp,
 // and the pitch / modulation wheels.
 
-#include "ui/Theme.h"
+#include "Theme.h"
 
 namespace fourpole
 {

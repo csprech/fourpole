@@ -4,10 +4,10 @@
 // panel table has no sound test here, so a new knob can't be added without one.
 
 #include "TestHelpers.h"
-#include "core/Mapping.h"
-#include "core/MidiMap.h"
-#include "core/PanelControls.h"
-#include "core/Synth.h"
+#include "../src/core/Mapping.h"
+#include "../src/core/MidiMap.h"
+#include "../src/core/PanelControls.h"
+#include "../src/core/Synth.h"
 #include <juce_core/juce_core.h>
 #include <set>
 

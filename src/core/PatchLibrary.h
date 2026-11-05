@@ -3,7 +3,7 @@
 // What < and > (and MIDI program changes) step through: the factory patches, then the .fourpole
 // files in the patch folder, sorted by name.
 
-#include "core/Patch.h"
+#include "Patch.h"
 
 namespace fourpole
 {

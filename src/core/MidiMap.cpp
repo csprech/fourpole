@@ -1,4 +1,4 @@
-#include "core/MidiMap.h"
+#include "MidiMap.h"
 
 namespace fourpole
 {

@@ -1,5 +1,5 @@
-#include "core/Synth.h"
-#include "core/Mapping.h"
+#include "Synth.h"
+#include "Mapping.h"
 #include <algorithm>
 
 namespace fourpole

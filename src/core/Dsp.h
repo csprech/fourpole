@@ -3,7 +3,7 @@
 // The voice's building blocks: band-limited oscillators, the nonlinear transistor-ladder filter,
 // RC-style contour generators, noise, and keyboard assignment. All allocation-free.
 
-#include "core/Patch.h"
+#include "Patch.h"
 #include <array>
 #include <cmath>
 #include <cstdint>

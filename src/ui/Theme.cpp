@@ -1,5 +1,5 @@
-#include "ui/Theme.h"
-#include "ui/Materials.h"
+#include "Theme.h"
+#include "Materials.h"
 #include <map>
 
 namespace fourpole::theme

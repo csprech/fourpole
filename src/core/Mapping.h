@@ -2,7 +2,7 @@
 
 // Panel units -> physical values, following the ranges in docs/research.md.
 
-#include "core/Patch.h"
+#include "Patch.h"
 #include <algorithm>
 #include <cmath>
 

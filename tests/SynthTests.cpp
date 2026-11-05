@@ -1,7 +1,7 @@
 #include "TestHelpers.h"
-#include "core/Mapping.h"
-#include "core/MidiMap.h"
-#include "core/Synth.h"
+#include "../src/core/Mapping.h"
+#include "../src/core/MidiMap.h"
+#include "../src/core/Synth.h"
 #include <juce_core/juce_core.h>
 
 using namespace fourpole;

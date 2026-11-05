@@ -10,16 +10,9 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/external/JUCE/CMakeLists.txt")
 endif()
 add_subdirectory(external/JUCE)
 
-# Core DSP: compiled into both the app and the test runner.
-set(FOURPOLE_CORE_SOURCES
-  src/core/Dsp.cpp
-  src/core/Synth.cpp
-  src/core/Patch.cpp
-  src/core/MidiMap.cpp
-  src/core/PanelControls.cpp
-  src/core/History.cpp
-  src/core/PatchLibrary.cpp
-)
+# The source lists (core DSP, engine + panel, the processor for hosts) live in fourpole-module.cmake, so the
+# Tabletop studio compiles exactly what the app does.
+include(fourpole-module.cmake)
 
 set(FOURPOLE_JUCE_DEFS
   JUCE_WEB_BROWSER=0
@@ -38,13 +31,7 @@ juce_add_gui_app(Fourpole
   MICROPHONE_PERMISSION_TEXT "Fourpole uses audio input 1 as its EXTERNAL INPUT when you choose to plug it in.")
 
 target_sources(Fourpole PRIVATE
-  ${FOURPOLE_CORE_SOURCES}
-  src/engine/Engine.cpp
-  src/ui/Materials.cpp
-  src/ui/Theme.cpp
-  src/ui/Controls.cpp
-  src/ui/Keyboard.cpp
-  src/ui/MainComponent.cpp
+  ${FOURPOLE_MODULE_SOURCES}
   src/Main.cpp)
 
 target_include_directories(Fourpole PRIVATE src)
@@ -52,6 +39,7 @@ target_compile_definitions(Fourpole PRIVATE ${FOURPOLE_JUCE_DEFS} JUCE_APPLICATI
   JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}")
 target_link_libraries(Fourpole PRIVATE
   juce::juce_audio_utils
+  juce::juce_audio_processors
   juce::juce_audio_devices
   juce::juce_gui_extra
   PUBLIC

@@ -1,17 +1,19 @@
-#include "engine/Engine.h"
+#include "Engine.h"
 
 namespace fourpole
 {
-Engine::Engine()
+Engine::Engine (bool isHosted) : hosted (isHosted)
 {
     uiPatch = factoryPatches()[1]; // "Fat Bass": something good the moment you play
     pendingPatch = uiPatch;
     pendingPatch.name = {};
+    writerThread.startThread();
+    if (hosted)
+        return; // the host brings the audio and the MIDI
 
     if (auto* path = std::getenv ("FOURPOLE_CAPTURE_WAV"))
         captureFile = juce::File (path);
     deviceManager.initialiseWithDefaultDevices (0, 2);
-    writerThread.startThread();
     deviceManager.addAudioCallback (this);
 
     // MIDI in: one callback for every enabled input; switch on what's connected now and anything later
@@ -26,6 +28,8 @@ Engine::~Engine()
 {
     stopRecording();
     writerThread.stopThread (2000);
+    if (hosted)
+        return;
     midiDeviceListConnection.reset();
     deviceManager.removeMidiInputDeviceCallback ({}, this);
     deviceManager.removeAudioCallback (this);
@@ -70,6 +74,11 @@ void Engine::setSustain (bool down) { post (juce::MidiMessage::controllerEvent (
 
 void Engine::setExternalAudioInput (bool use)
 {
+    if (hosted)
+    {
+        useInput = use; // hosted, EXTERNAL INPUT is the AUDIO IN jack
+        return;
+    }
     auto setup = deviceManager.getAudioDeviceSetup();
     setup.useDefaultInputChannels = false;
     setup.inputChannels.clear();
@@ -138,6 +147,12 @@ void Engine::pushController (int cc, int value)
 
 void Engine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& m)
 {
+    if (routeMidi (m))
+        collector.addMessageToQueue (m);
+}
+
+bool Engine::routeMidi (const juce::MidiMessage& m)
+{
     if (m.isNoteOn())
         midiKeys[(size_t) m.getNoteNumber()] = true;
     else if (m.isNoteOff())
@@ -150,15 +165,31 @@ void Engine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessag
         for (auto& k : midiKeys)
             k = false; // and the on-screen keys come up too
     else if (m.isProgramChange())
-        return pushController (kProgramChange, m.getProgramChangeNumber()); // the panel picks the patch
+    {
+        pushController (kProgramChange, m.getProgramChangeNumber()); // the panel picks the patch
+        return false;
+    }
     else if (m.isController() && ! MidiMap::isReserved (m.getControllerNumber()))
-        return pushController (m.getControllerNumber(), m.getControllerValue()); // a panel CC: becomes a knob move
-    collector.addMessageToQueue (m);
+    {
+        pushController (m.getControllerNumber(), m.getControllerValue()); // a panel CC: becomes a knob move
+        return false;
+    }
+    return true;
 }
 
-void Engine::audioDeviceAboutToStart (juce::AudioIODevice* device)
+void Engine::audioDeviceAboutToStart (juce::AudioIODevice* device) { prepare (device->getCurrentSampleRate()); }
+
+void Engine::prepareHosted (double sr, int) { prepare (sr); }
+
+void Engine::processHosted (const float* in, float* out, int numSamples, juce::MidiBuffer& midi)
 {
-    const double sr = device->getCurrentSampleRate();
+    float* outs[1] = { out };
+    render (in, outs, 1, numSamples, &midi);
+    midi.clear();
+}
+
+void Engine::prepare (double sr)
+{
     sampleRate = sr;
     collector.reset (sr);
     synth.prepare (sr);
@@ -175,8 +206,13 @@ void Engine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 void Engine::audioDeviceIOCallbackWithContext (const float* const* inputs, int numIn, float* const* outputs, int numOut,
                                                int numSamples, const juce::AudioIODeviceCallbackContext&)
 {
+    render (numIn > 0 ? inputs[0] : nullptr, outputs, numOut, numSamples, nullptr);
+}
+
+void Engine::render (const float* input, float* const* outputs, int numOut, int numSamples, const juce::MidiBuffer* hostMidi)
+{
     synth.setPower (power.load());
-    const float* in = useInput.load() && numIn > 0 ? inputs[0] : nullptr;
+    const float* in = useInput.load() ? input : nullptr;
     synth.setExternalInput (in);
     if (in != nullptr)
         inputLevel = juce::FloatVectorOperations::findMaximum (in, numSamples);
@@ -192,6 +228,13 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const* inputs, int n
 
     midiBlock.clear();
     collector.removeNextBlockOfMessages (midiBlock, numSamples);
+    if (hostMidi != nullptr)
+        for (const auto meta : *hostMidi) // the MIDI IN jack, sample-accurate
+        {
+            const auto m = meta.getMessage();
+            if (routeMidi (m))
+                midiBlock.addEvent (m, juce::jlimit (0, juce::jmax (0, numSamples - 1), meta.samplePosition));
+        }
 
     float* out = numOut > 0 ? outputs[0] : nullptr;
     if (out == nullptr)

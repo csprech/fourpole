@@ -4,7 +4,7 @@
 // units, and the Patch field it sets. The UI binds its widgets through this table, MIDI learn stores
 // these IDs, and the tests walk it to prove that each control reaches the sound.
 
-#include "core/Patch.h"
+#include "Patch.h"
 #include <functional>
 #include <vector>
 

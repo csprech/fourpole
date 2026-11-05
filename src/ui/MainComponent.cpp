@@ -1,6 +1,6 @@
-#include "ui/MainComponent.h"
-#include "ui/Materials.h"
-#include "core/Mapping.h"
+#include "MainComponent.h"
+#include "Materials.h"
+#include "../core/Mapping.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 
 namespace fourpole
@@ -29,7 +29,8 @@ juce::String formatHz (double hz)
 MainComponent::MainComponent (Engine& e) : engine (e)
 {
     setLookAndFeel (&lnf);
-    juce::LookAndFeel::setDefaultLookAndFeel (&lnf);
+    if (! engine.isHosted()) // (in a studio the host owns the default look; ours stays on this panel)
+        juce::LookAndFeel::setDefaultLookAndFeel (&lnf);
     setWantsKeyboardFocus (true);
     patch = engine.getPatch();
     for (size_t i = 0; i < factoryPatches().size(); ++i)
@@ -177,7 +178,10 @@ MainComponent::MainComponent (Engine& e) : engine (e)
     for (auto* k : { &extVol, &noiseVol })
         unitText (*k, [] (double v) { return juce::String (v, 1); });
 
-    loadSettings();
+    if (engine.isHosted())
+        audioBtn.setVisible (false); // the studio's audio interface does this job
+    else
+        loadSettings(); // (hosted, the studio saves the panel with the session)
     updateTooltips();
 
     // keys belong to the keyboard: nothing else takes keyboard focus
@@ -223,7 +227,8 @@ MainComponent::~MainComponent()
     saveSettings (false); // (the window is already going: its place was saved by prepareToQuit)
     stopTimer();
     engine.onMidiDeviceMessage = nullptr;
-    juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+    if (! engine.isHosted())
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     setLookAndFeel (nullptr);
 }
 

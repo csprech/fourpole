@@ -5,8 +5,8 @@
 //   -> transistor ladder (filter contour, keyboard tracking, modulation) -> loudness contour -> output
 // Platform-neutral and allocation-free; the engine calls it from the audio thread.
 
-#include "core/Dsp.h"
-#include "core/Patch.h"
+#include "Dsp.h"
+#include "Patch.h"
 
 namespace fourpole
 {

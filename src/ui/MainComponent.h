@@ -1,12 +1,12 @@
 #pragma once
 
-#include "core/History.h"
-#include "core/PanelControls.h"
-#include "core/PatchLibrary.h"
-#include "engine/Engine.h"
-#include "ui/Controls.h"
-#include "ui/Keyboard.h"
-#include "ui/Theme.h"
+#include "../core/History.h"
+#include "../core/PanelControls.h"
+#include "../core/PatchLibrary.h"
+#include "../engine/Engine.h"
+#include "Controls.h"
+#include "Keyboard.h"
+#include "Theme.h"
 
 namespace fourpole
 {

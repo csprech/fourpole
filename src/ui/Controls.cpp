@@ -1,5 +1,5 @@
-#include "ui/Controls.h"
-#include "ui/Materials.h"
+#include "Controls.h"
+#include "Materials.h"
 
 namespace fourpole
 {

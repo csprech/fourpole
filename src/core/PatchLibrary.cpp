@@ -1,4 +1,4 @@
-#include "core/PatchLibrary.h"
+#include "PatchLibrary.h"
 
 namespace fourpole
 {

@@ -1,6 +1,6 @@
 #include "TestHelpers.h"
-#include "core/Dsp.h"
-#include "core/Mapping.h"
+#include "../src/core/Dsp.h"
+#include "../src/core/Mapping.h"
 #include <juce_core/juce_core.h>
 
 using namespace fourpole;

@@ -1,8 +1,8 @@
 // The instrument's functions around the sound: undo / redo, and the patch list that < > and MIDI
 // program changes step through.
 
-#include "core/History.h"
-#include "core/PatchLibrary.h"
+#include "../src/core/History.h"
+#include "../src/core/PatchLibrary.h"
 #include <juce_core/juce_core.h>
 
 using namespace fourpole;

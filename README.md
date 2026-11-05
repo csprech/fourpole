@@ -156,3 +156,10 @@ tests/        JUCE UnitTest suites for all of core/
 - The audio-input setting for EXTERNAL INPUT is unit-tested but hasn't been tried with a real interface in the running app.
 - Oscillator hard sync and other later-model additions; polyphony and paraphony (it's a monosynth by design).
 - A plugin (AU/VST3) version.
+
+## In the Tabletop studio
+
+Fourpole also runs inside [Tabletop](https://github.com/csprech/tabletop), a studio where devices sit on a wooden table and you cable them together.
+- `fourpole-module.cmake` lists the sources a host compiles; this app builds from the same lists.
+- `src/plugin/FourpoleProcessor` wraps the engine and the panel as a JUCE audio processor. Its jacks become the processor's audio and MIDI buses: EXTERNAL INPUT (audio in), OUTPUT (mono) and MIDI IN.
+- In hosted mode the engine opens no audio or MIDI device of its own: the host feeds it audio and MIDI a block at a time.

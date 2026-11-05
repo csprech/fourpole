@@ -1,4 +1,4 @@
-#include "core/PanelControls.h"
+#include "PanelControls.h"
 #include <algorithm>
 #include <cmath>
 

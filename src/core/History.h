@@ -2,7 +2,7 @@
 
 // Undo / redo for panel edits: snapshots of the panel (the patch, and which patch file it is).
 
-#include "core/Patch.h"
+#include "Patch.h"
 #include <deque>
 #include <optional>
 

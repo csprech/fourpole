@@ -6,8 +6,8 @@
 //    MidiMessageCollector, so they land sample-accurately inside the next block.
 //  * MIDI inputs can be plugged in any time (all enabled inputs are heard; new ones are switched on).
 
-#include "core/MidiMap.h"
-#include "core/Synth.h"
+#include "../core/MidiMap.h"
+#include "../core/Synth.h"
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -19,8 +19,17 @@ namespace fourpole
 class Engine : public juce::AudioIODeviceCallback, public juce::MidiInputCallback
 {
 public:
-    Engine();
+    /** Standalone, the engine opens the audio device and the MIDI inputs itself. Hosted (inside a studio or a
+        plug-in host), it opens nothing: the host calls prepareHosted() and processHosted(). */
+    explicit Engine (bool hosted = false);
     ~Engine() override;
+    bool isHosted() const { return hosted; }
+
+    /** Hosted: the sample rate and the largest block to expect. */
+    void prepareHosted (double sampleRate, int maxBlockSize);
+    /** Hosted: one block. `in` is EXTERNAL INPUT (mono, may be null); `out` gets the voice; `midi` carries the
+        notes, bends and CCs arriving at the MIDI IN jack (and is cleared: Fourpole sends no MIDI). */
+    void processHosted (const float* in, float* out, int numSamples, juce::MidiBuffer& midi);
 
     juce::AudioDeviceManager& getDeviceManager() { return deviceManager; }
 
@@ -72,6 +81,12 @@ public:
 private:
     void audioDeviceIOCallbackWithContext (const float* const* inputs, int numIn, float* const* outputs, int numOut,
                                            int numSamples, const juce::AudioIODeviceCallbackContext&) override;
+    void prepare (double sampleRate);
+    void render (const float* in, float* const* outputs, int numOut, int numSamples, const juce::MidiBuffer* hostMidi);
+    /** A message from a MIDI input: tracked for the screen keyboard, routed to the panel (CCs, program changes)
+        or, when it's for the voice, returned true. */
+    bool routeMidi (const juce::MidiMessage& m);
+    const bool hosted;
     void audioDeviceAboutToStart (juce::AudioIODevice*) override;
     void audioDeviceStopped() override {}
     void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
