@@ -1,5 +1,7 @@
 # Fourpole
 
+> **This is the `gpui` branch:** Fourpole with a [GPUI](https://gpui.rs) front end (experimental). [`gpui/README.md`](gpui/README.md) explains how it's built, run and tested. The JUCE app described below still builds from this branch. [`main`](https://github.com/csprech/fourpole/tree/main) keeps it unchanged.
+
 A desktop three-oscillator monophonic synthesizer built for research. It reproduces the architecture, controls and playing behaviour of the classic 1970 portable monosynth: three VCOs, a mixer, the 24 dB/octave transistor-ladder filter, two contours and a 44-key low-note-priority keyboard. It uses an original name and panel design; it doesn't use any manufacturer's names, logos, artwork or firmware.
 
 C++20 / JUCE 8, macOS (Apple Silicon tested). The DSP core is platform-neutral and unit-tested.
